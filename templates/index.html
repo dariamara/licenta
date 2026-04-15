@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Processor</title>
+    <style>
+        .container { display: flex; gap: 20px; margin-top: 20px; }
+        img { max-width: 400px; border: 1px solid #ddd; }
+    </style>
+</head>
+<body>
+    <h1>Upload and Process Image</h1>
+    <form action="/upload/" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="image/*">
+        <button type="submit">Upload & Process</button>
+    </form>
+
+    {% if original %}
+    <div class="container">
+        <div>
+            <h3>Original</h3>
+            <img src="/{{ original }}" alt="Original">
+        </div>
+        <div>
+            <h3>Processed</h3>
+            <img src="/{{ processed }}" alt="Processed">
+        </div>
+    </div>
+    {% endif %}
+</body>
+</html>
