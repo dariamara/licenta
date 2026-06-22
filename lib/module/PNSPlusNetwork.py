@@ -8,7 +8,7 @@ from lib.module.LightRFB import LightRFB
 from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
 # from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
-from lib.module.KAN import KANBlock, PatchEmbed
+# from lib.module.KAN import KANBlock, PatchEmbed
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -71,19 +71,19 @@ class PNSNet(nn.Module):
         self.up_sample_low = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
         self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
 
-        self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
-        
-        self.block_h_1 = nn.ModuleList([KANBlock(
-            dim=1024
-            )])
-
-        self.block_h_2 = nn.ModuleList([KANBlock(
-            dim=32
-            )])
-        
-        self.norm_h_1 = nn.LayerNorm(1024)
-        
-        self.norm_h_2 = nn.LayerNorm(32)
+        # self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
+        #
+        # self.block_h_1 = nn.ModuleList([KANBlock(
+        #     dim=1024
+        #     )])
+        #
+        # self.block_h_2 = nn.ModuleList([KANBlock(
+        #     dim=32
+        #     )])
+        #
+        # self.norm_h_1 = nn.LayerNorm(1024)
+        #
+        # self.norm_h_2 = nn.LayerNorm(32)
 
         self.use_kan = use_kan
 
@@ -110,12 +110,12 @@ class PNSNet(nn.Module):
         #
         # high_feature = self.feature_extractor.stages[3](high_feature)
 
-        if self.use_kan:
-            high_feature, H, W = self.patch_embed_h_1(high_feature)
-            for i, blk in enumerate(self.block_h_1):
-                high_feature = blk(high_feature, H, W)
-            high_feature = self.norm_h_1(high_feature)
-            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        # if self.use_kan:
+        #     high_feature, H, W = self.patch_embed_h_1(high_feature)
+        #     for i, blk in enumerate(self.block_h_1):
+        #         high_feature = blk(high_feature, H, W)
+        #     high_feature = self.norm_h_1(high_feature)
+        #     high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
 
         high_feature = self.up_sample_high(high_feature)
 
@@ -156,18 +156,18 @@ class PNSNet(nn.Module):
         high_feature = high_feature.contiguous().view(-1, *high_feature.shape[2:])
         low_feature = low_feature.contiguous().view(-1, *low_feature.shape[2:])
 
-        if self.use_kan:
-            B, _, H, W = high_feature.shape
-            high_feature = high_feature.flatten(2).transpose(1,2)
-            for i, blk in enumerate(self.block_h_2):
-                high_feature = blk(high_feature, H, W)
-            high_feature = self.norm_h_2(high_feature)
-            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
-
-            #daria
-            #la train am primit warning ca val default a lui align_corners s-a schimbat din false in true => l-am pus false explicit
-            high_feature = nn.Mish()(F.interpolate(high_feature, size=(high_feature_H, high_feature_W), mode='bilinear', align_corners=False))
-            #end daria
+        # if self.use_kan:
+        #     B, _, H, W = high_feature.shape
+        #     high_feature = high_feature.flatten(2).transpose(1,2)
+        #     for i, blk in enumerate(self.block_h_2):
+        #         high_feature = blk(high_feature, H, W)
+        #     high_feature = self.norm_h_2(high_feature)
+        #     high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        #
+        #     #daria
+        #     #la train am primit warning ca val default a lui align_corners s-a schimbat din false in true => l-am pus false explicit
+        #     high_feature = nn.Mish()(F.interpolate(high_feature, size=(high_feature_H, high_feature_W), mode='bilinear', align_corners=False))
+        #     #end daria
 
         to_slice = t_h.shape[0] - high_feature.shape[0]
         
