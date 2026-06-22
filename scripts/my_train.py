@@ -227,7 +227,8 @@ if __name__ == '__main__':
     # torch.manual_seed(seed)
     # torch.cuda.manual_seed_all(seed)
 
-    model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan = config.use_kan).cuda()
+    # model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan = config.use_kan).cuda()
+    model = Network(bn_out=(config.size[0] // 8, config.size[1] // 8), use_kan=config.use_kan).cuda()
     model = nn.DataParallel(model)
 
     cudnn.benchmark = True

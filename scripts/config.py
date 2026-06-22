@@ -6,7 +6,10 @@ parser = argparse.ArgumentParser()
 # optimizer
 parser.add_argument('--gpu_id', type=str, default='0, 1', help='train use gpu')
 parser.add_argument('--lr_mode', type=str, default="poly")
-parser.add_argument('--backbone_lr', type=float, default=3e-5)
+# parser.add_argument('--backbone_lr', type=float, default=3e-5)
+# contributie start
+parser.add_argument('--backbone_lr', type=float, default=2e-4)
+# contributie end
 parser.add_argument('--head_lr', type=float, default=1e-3)
 parser.add_argument('--backbone_weight_decay', type=float, default=1e-8)
 parser.add_argument('--head_weight_decay', type=float, default=1e-8)

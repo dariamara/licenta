@@ -7,7 +7,8 @@ import torch.nn.functional as F
 from lib.module.LightRFB import LightRFB
 from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
-from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
+#from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
+from lib.module.MedNeXt import create_mednext_encoder
 from lib.module.KAN import KANBlock, PatchEmbed
 
 
@@ -57,22 +58,27 @@ class DilatedParallelConvBlockD2(nn.Module):
 class PNSNet(nn.Module):
     def __init__(self, bn_out, use_kan):
         super(PNSNet, self).__init__()
-        self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
-        self.High_RFB = LightRFB(channels_in=1024)
-        self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
+        # contributie start
+        self.feature_extractor = create_mednext_encoder(
+            'B', in_channels=3, n_channels=64, kernel_size=3, dim='2d'
+        )
+        # contributie end
+        # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
+        # self.High_RFB = LightRFB(channels_in=1024)
+        # self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
 
         self.High_drop = nn.Dropout2d(0.5)
         self.Low_drop = nn.Dropout2d(0.5)
 
-        self.squeeze = nn.Sequential(nn.Conv2d(1024, 32, 1), nn.GroupNorm(2, 32), nn.Mish(inplace=True))
+        # self.squeeze = nn.Sequential(nn.Conv2d(1024, 32, 1), nn.GroupNorm(2, 32), nn.Mish(inplace=True))
         self.decoder = conbine_feature()
         self.SegNIN = nn.Sequential(nn.Dropout2d(0.1), nn.Conv2d(16, 1, kernel_size=1, bias=False))
         self.NSB_global = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[3, 4, 3, 4])
         self.NSB_local = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[1, 2, 1, 2])
-        self.up_sample_low = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
-        self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
+        # self.up_sample_low = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
+        # self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
 
-        self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
+        # self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
         
         self.block_h_1 = nn.ModuleList([KANBlock(
             dim=1024
@@ -97,19 +103,36 @@ class PNSNet(nn.Module):
 
         #print(x)
         #print(x.shape)
-        x = self.feature_extractor.downsample_layers[0](x)
-        x = self.feature_extractor.stages[0](x)
 
-        x = self.feature_extractor.downsample_layers[1](x)
-        x = self.feature_extractor.stages[1](x)
+        # x = self.feature_extractor.downsample_layers[0](x)
+        # x = self.feature_extractor.stages[0](x)
+
+        # x = self.feature_extractor.downsample_layers[1](x)
+        # x = self.feature_extractor.stages[1](x)
 
         # Extract anchor, low-level, and high-level features.
-        low_feature = self.feature_extractor.downsample_layers[2](x)
-        low_feature = self.feature_extractor.stages[2](low_feature)
+        # low_feature = self.feature_extractor.downsample_layers[2](x)
+        # low_feature = self.feature_extractor.stages[2](low_feature)
 
-        high_feature = self.feature_extractor.downsample_layers[3](low_feature)
+        # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
+        # high_feature = self.feature_extractor.stages[3](high_feature)
 
-        high_feature = self.feature_extractor.stages[3](high_feature)
+        # contributie start
+        x = self.feature_extractor.stem(x)
+        x = self.feature_extractor.enc_block_0(x)
+        x = self.feature_extractor.down_0(x)
+
+        x = self.feature_extractor.enc_block_1(x)
+        x = self.feature_extractor.down_1(x)
+
+        x = self.feature_extractor.enc_block_2(x)
+        x = self.feature_extractor.down_2(x)
+
+        low_feature = self.feature_extractor.enc_block_3(x)
+
+        high_feature = self.feature_extractor.down_3(low_feature)
+        high_feature = self.feature_extractor.bottleneck(high_feature)
+        # contributie end
 
         if self.use_kan:
             high_feature, H, W = self.patch_embed_h_1(high_feature)
