@@ -7,9 +7,8 @@ import torch.nn.functional as F
 from lib.module.LightRFB import LightRFB
 from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
-from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
+# from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
 from lib.module.KAN import KANBlock, PatchEmbed
-
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -57,7 +56,7 @@ class DilatedParallelConvBlockD2(nn.Module):
 class PNSNet(nn.Module):
     def __init__(self, bn_out, use_kan):
         super(PNSNet, self).__init__()
-        self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
+        # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
         self.High_RFB = LightRFB(channels_in=1024)
         self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
 
@@ -97,19 +96,19 @@ class PNSNet(nn.Module):
 
         #print(x)
         #print(x.shape)
-        x = self.feature_extractor.downsample_layers[0](x)
-        x = self.feature_extractor.stages[0](x)
-
-        x = self.feature_extractor.downsample_layers[1](x)
-        x = self.feature_extractor.stages[1](x)
-
-        # Extract anchor, low-level, and high-level features.
-        low_feature = self.feature_extractor.downsample_layers[2](x)
-        low_feature = self.feature_extractor.stages[2](low_feature)
-
-        high_feature = self.feature_extractor.downsample_layers[3](low_feature)
-
-        high_feature = self.feature_extractor.stages[3](high_feature)
+        # x = self.feature_extractor.downsample_layers[0](x)
+        # x = self.feature_extractor.stages[0](x)
+        #
+        # x = self.feature_extractor.downsample_layers[1](x)
+        # x = self.feature_extractor.stages[1](x)
+        #
+        # # Extract anchor, low-level, and high-level features.
+        # low_feature = self.feature_extractor.downsample_layers[2](x)
+        # low_feature = self.feature_extractor.stages[2](low_feature)
+        #
+        # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
+        #
+        # high_feature = self.feature_extractor.stages[3](high_feature)
 
         if self.use_kan:
             high_feature, H, W = self.patch_embed_h_1(high_feature)
