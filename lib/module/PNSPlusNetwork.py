@@ -8,7 +8,7 @@ from lib.module.LightRFB import LightRFB
 from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
 # from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
-# from lib.module.KAN import KANBlock, PatchEmbed
+from lib.module.KAN import KANBlock, PatchEmbed, D_ConvLayer
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -85,6 +85,39 @@ class PNSNet(nn.Module):
         #
         # self.norm_h_2 = nn.LayerNorm(32)
 
+        self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1280)
+        self.patch_embed_h_2 = PatchEmbed(img_size=256 // 16, patch_size=3, stride=2, in_chans=1280, embed_dim=2048)
+
+        self.block_h_1 = nn.ModuleList([KANBlock(
+            dim=1280
+        )])
+
+        self.block_h_2 = nn.ModuleList([KANBlock(
+            dim=32
+        )])
+
+        self.norm_h_1 = nn.LayerNorm(1280)
+        self.norm_h_2 = nn.LayerNorm(32)
+
+        self.block_h_1b = nn.ModuleList([KANBlock(
+            dim=2048
+        )])
+
+        self.norm_h_1b = nn.LayerNorm(2048)
+
+        self.dblock_h_1 = nn.ModuleList([KANBlock(
+            dim=1280
+        )])
+        self.dnorm_h_1 = nn.LayerNorm(1280)
+
+        self.dblock_h_2 = nn.ModuleList([KANBlock(
+            dim=1024
+        )])
+        self.dnorm_h_2 = nn.LayerNorm(1024)
+
+        self.kan_decoder1 = D_ConvLayer(2048, 1280)
+        self.kan_decoder2 = D_ConvLayer(1280, 1024)
+
         self.use_kan = use_kan
 
     def forward(self, x):
@@ -116,6 +149,45 @@ class PNSNet(nn.Module):
         #         high_feature = blk(high_feature, H, W)
         #     high_feature = self.norm_h_1(high_feature)
         #     high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+
+        # contributie start
+        if self.use_kan:
+            high_feature_skip_1 = high_feature
+
+            high_feature, H, W = self.patch_embed_h_1(high_feature)
+            for i, blk in enumerate(self.block_h_1):
+                high_feature = blk(high_feature, H, W)
+            high_feature = self.norm_h_1(high_feature)
+            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+
+            high_feature_skip_2 = high_feature
+
+            high_feature, H, W = self.patch_embed_h_2(high_feature)
+            for i, blk in enumerate(self.block_h_1b):
+                high_feature = blk(high_feature, H, W)
+            high_feature = self.norm_h_1b(high_feature)
+            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+
+            high_feature = F.relu(F.interpolate(self.kan_decoder1(high_feature), scale_factor=(2, 2), mode='bilinear',
+                                                align_corners=False))
+            high_feature = torch.add(high_feature, high_feature_skip_2)
+            _, _, H, W = high_feature.shape
+            high_feature = high_feature.flatten(2).transpose(1, 2)
+            for i, blk in enumerate(self.dblock_h_1):
+                high_feature = blk(high_feature, H, W)
+            high_feature = self.dnorm_h_1(high_feature)
+            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+
+            high_feature = F.relu(F.interpolate(self.kan_decoder2(high_feature), scale_factor=(2, 2), mode='bilinear',
+                                                align_corners=False))
+            high_feature = torch.add(high_feature, high_feature_skip_1)
+            _, _, H, W = high_feature.shape
+            high_feature = high_feature.flatten(2).transpose(1, 2)
+            for i, blk in enumerate(self.dblock_h_2):
+                high_feature = blk(high_feature, H, W)
+            high_feature = self.dnorm_h_2(high_feature)
+            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        # contributie end
 
         high_feature = self.up_sample_high(high_feature)
 
@@ -168,6 +240,20 @@ class PNSNet(nn.Module):
         #     #la train am primit warning ca val default a lui align_corners s-a schimbat din false in true => l-am pus false explicit
         #     high_feature = nn.Mish()(F.interpolate(high_feature, size=(high_feature_H, high_feature_W), mode='bilinear', align_corners=False))
         #     #end daria
+
+        if self.use_kan:
+            B, _, H, W = high_feature.shape
+            high_feature = high_feature.flatten(2).transpose(1, 2)
+            for i, blk in enumerate(self.block_h_2):
+                high_feature = blk(high_feature, H, W)
+            high_feature = self.norm_h_2(high_feature)
+            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+
+            # daria
+            # la train am primit warning ca val default a lui align_corners s-a schimbat din false in true => l-am pus false explicit
+            high_feature = nn.Mish()(F.interpolate(high_feature, size=(high_feature_H, high_feature_W), mode='bilinear',
+                                                   align_corners=False))
+            # end daria
 
         to_slice = t_h.shape[0] - high_feature.shape[0]
         
