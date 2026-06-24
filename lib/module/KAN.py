@@ -4,7 +4,7 @@ import math
 import torch.nn as nn
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
-__all__ = ['KANBlock', 'PatchEmbed', 'D_ConvLayer']
+__all__ = ['KANBlock', 'PatchEmbed', 'D_ConvLayer'] #contributie : added D_ConvLayer
 
 class KANLinear(torch.nn.Module):
     def __init__(
