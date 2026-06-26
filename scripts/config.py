@@ -6,8 +6,8 @@ parser = argparse.ArgumentParser()
 # optimizer
 parser.add_argument('--gpu_id', type=str, default='0, 1', help='train use gpu')
 parser.add_argument('--lr_mode', type=str, default="poly")
-# parser.add_argument('--backbone_lr', type=float, default=3e-5)
 # contributie start
+# MedNeXt trains from scratch (no pretrained weights), so backbone needs a higher LR than ConvNeXt's 3e-5
 parser.add_argument('--backbone_lr', type=float, default=2e-4)
 # contributie end
 parser.add_argument('--head_lr', type=float, default=1e-3)
@@ -38,7 +38,7 @@ parser.add_argument('--augment', action='store_true', help='Enable augmentation'
 
 parser.add_argument('--checkpoint_path', type=str, default='', help='Load training state')
 
-parser.add_argument('--pth_path', type=str, default='/tmp/work/epoch_1/PNSPlus.pth')
+parser.add_argument('--pth_path', type=str, default='/tmp/work/epoch_2/PNSPlus.pth')
 
 parser.add_argument('--test_split', type=str, default="TestEasyDataset/Unseen")
 

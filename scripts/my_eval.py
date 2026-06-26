@@ -108,6 +108,9 @@ if __name__ == '__main__':
             #print(image.shape)
             image = image.cuda()
             gt = gt.cuda()
+            # # contributie start
+            # print("gt unique values:", torch.unique(gt))
+            # # contributie end
             pred = model(image)
             for i in range(gt.shape[1]):
                 dice = cofficent_calculate(pred[i], gt[0][i])[0]
@@ -119,7 +122,10 @@ if __name__ == '__main__':
                 if not os.path.exists(save_dir):
                     os.makedirs(save_dir)
                 img_save_path = save_dir + "/" + img_pth[i+1][1][0].split('/')[-1]
-                pil_img = ToPILImage()(pred[i])
+                # pil_img = ToPILImage()(pred[i]) -> original
+                # contributie start
+                pil_img = ToPILImage()((pred[i] > 0.5).float())
+                # contributie end
                 pil_img.save(img_save_path)
 
     if config.ema_test:

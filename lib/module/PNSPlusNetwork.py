@@ -3,6 +3,9 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+# contributie start
+import torch.utils.checkpoint as checkpoint
+# contributie end
 
 from lib.module.LightRFB import LightRFB
 from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
@@ -64,8 +67,9 @@ class PNSNet(nn.Module):
         )
         # contributie end
         # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
-        # self.High_RFB = LightRFB(channels_in=1024)
-        # self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
+
+        self.High_RFB = LightRFB(channels_in=1024)
+        self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
 
         self.High_drop = nn.Dropout2d(0.5)
         self.Low_drop = nn.Dropout2d(0.5)
@@ -75,10 +79,10 @@ class PNSNet(nn.Module):
         self.SegNIN = nn.Sequential(nn.Dropout2d(0.1), nn.Conv2d(16, 1, kernel_size=1, bias=False))
         self.NSB_global = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[3, 4, 3, 4])
         self.NSB_local = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[1, 2, 1, 2])
-        # self.up_sample_low = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
-        # self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
+        self.up_sample_low = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
+        self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
 
-        # self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
+        self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
         
         self.block_h_1 = nn.ModuleList([KANBlock(
             dim=1024
@@ -117,12 +121,15 @@ class PNSNet(nn.Module):
         # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
         # high_feature = self.feature_extractor.stages[3](high_feature)
 
+        # in PNSNet.forward()
         # contributie start
         x = self.feature_extractor.stem(x)
-        x = self.feature_extractor.enc_block_0(x)
+        # Use iterative_checkpoint (passes dummy_tensor) so checkpointing works
+        # even when x does not yet require grad at the first encoder stage.
+        x = self.feature_extractor.iterative_checkpoint(self.feature_extractor.enc_block_0, x)
         x = self.feature_extractor.down_0(x)
 
-        x = self.feature_extractor.enc_block_1(x)
+        x = self.feature_extractor.iterative_checkpoint(self.feature_extractor.enc_block_1, x)
         x = self.feature_extractor.down_1(x)
 
         x = self.feature_extractor.enc_block_2(x)
@@ -137,7 +144,10 @@ class PNSNet(nn.Module):
         if self.use_kan:
             high_feature, H, W = self.patch_embed_h_1(high_feature)
             for i, blk in enumerate(self.block_h_1):
-                high_feature = blk(high_feature, H, W)
+                # high_feature = blk(high_feature, H, W)
+                # contributie start
+                high_feature = checkpoint.checkpoint(blk, high_feature, H, W)
+            #     contrbutie end
             high_feature = self.norm_h_1(high_feature)
             high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
 

@@ -391,132 +391,39 @@ class MedNeXt(nn.Module):
             return x
 
 
-class MedNeXtEncoder(nn.Module):
-    """
-    Encoder-only MedNeXt: stem + 4 encoder stages (each followed by a
-    downsampling block) + bottleneck. This is the first half of `MedNeXt`
-    above, with the decoder half (up_X / dec_block_X / out_X) removed.
-
-    Exposes the same submodule names as the encoder portion of `MedNeXt`
-    (stem, enc_block_0..3, down_0..3, bottleneck) so it can be driven layer
-    by layer the same way PNSPlusNetwork.py used to drive ConvNeXt's
-    `downsample_layers` / `stages` lists.
-
-    Channel progression (with default n_channels): n -> n -> 2n -> 2n -> 4n
-    -> 4n -> 8n -> 8n -> 16n, with one 2x spatial downsample at each down_X.
-    Note the stem itself does NOT downsample (kernel_size=1, stride=1) --
-    all downsampling happens inside down_0/1/2/3.
-    """
-    def __init__(self,
-        in_channels: int,
-        n_channels: int,
-        exp_r: int = 4,
-        kernel_size: int = 7,
-        do_res: bool = False,
-        do_res_up_down: bool = False,
-        checkpoint_style: str = None,
-        block_counts: list = [2, 2, 2, 2, 2],   # enc_0, enc_1, enc_2, enc_3, bottleneck
-        norm_type: str = 'group',
-        dim: str = '2d',
-        grn: bool = False
-    ):
-        super().__init__()
-
-        assert checkpoint_style in [None, 'outside_block']
-        self.outside_block_checkpointing = checkpoint_style == 'outside_block'
-        assert dim in ['2d', '3d']
-        assert len(block_counts) == 5, \
-            "block_counts must have exactly 5 entries: [enc_0, enc_1, enc_2, enc_3, bottleneck]"
-
-        conv = nn.Conv2d if dim == '2d' else nn.Conv3d
-
-        self.stem = conv(in_channels, n_channels, kernel_size=1)
-
-        if type(exp_r) == int:
-            exp_r = [exp_r for _ in range(len(block_counts))]
-        assert len(exp_r) == 5, \
-            "exp_r must have exactly 5 entries when passed as a list: [enc_0, enc_1, enc_2, enc_3, bottleneck]"
-
-        self.enc_block_0 = nn.Sequential(*[
-            MedNeXtBlock(n_channels, n_channels, exp_r[0], kernel_size,
-                        do_res=do_res, norm_type=norm_type, dim=dim, grn=grn)
-            for _ in range(block_counts[0])
-        ])
-        self.down_0 = MedNeXtDownBlock(
-            n_channels, 2 * n_channels, exp_r[1], kernel_size,
-            do_res=do_res_up_down, norm_type=norm_type, dim=dim, grn=grn
-        )
-
-        self.enc_block_1 = nn.Sequential(*[
-            MedNeXtBlock(2 * n_channels, 2 * n_channels, exp_r[1], kernel_size,
-                        do_res=do_res, norm_type=norm_type, dim=dim, grn=grn)
-            for _ in range(block_counts[1])
-        ])
-        self.down_1 = MedNeXtDownBlock(
-            2 * n_channels, 4 * n_channels, exp_r[2], kernel_size,
-            do_res=do_res_up_down, norm_type=norm_type, dim=dim, grn=grn
-        )
-
-        self.enc_block_2 = nn.Sequential(*[
-            MedNeXtBlock(4 * n_channels, 4 * n_channels, exp_r[2], kernel_size,
-                        do_res=do_res, norm_type=norm_type, dim=dim, grn=grn)
-            for _ in range(block_counts[2])
-        ])
-        self.down_2 = MedNeXtDownBlock(
-            4 * n_channels, 8 * n_channels, exp_r[3], kernel_size,
-            do_res=do_res_up_down, norm_type=norm_type, dim=dim, grn=grn
-        )
-
-        self.enc_block_3 = nn.Sequential(*[
-            MedNeXtBlock(8 * n_channels, 8 * n_channels, exp_r[3], kernel_size,
-                        do_res=do_res, norm_type=norm_type, dim=dim, grn=grn)
-            for _ in range(block_counts[3])
-        ])
-        self.down_3 = MedNeXtDownBlock(
-            8 * n_channels, 16 * n_channels, exp_r[4], kernel_size,
-            do_res=do_res_up_down, norm_type=norm_type, dim=dim, grn=grn
-        )
-
-        self.bottleneck = nn.Sequential(*[
-            MedNeXtBlock(16 * n_channels, 16 * n_channels, exp_r[4], kernel_size,
-                        do_res=do_res, norm_type=norm_type, dim=dim, grn=grn)
-            for _ in range(block_counts[4])
-        ])
-
-        # Needed by torch.utils.checkpoint when checkpoint_style='outside_block'
-        self.dummy_tensor = nn.Parameter(torch.tensor([1.]), requires_grad=True)
-
-    def iterative_checkpoint(self, sequential_block, x):
-        for l in sequential_block:
-            x = checkpoint.checkpoint(l, x, self.dummy_tensor)
-        return x
-
-
+#contributie
 def create_mednext_encoder(model_id, in_channels=3, n_channels=64, kernel_size=3, dim='2d'):
     """
-    Convenience factory mirroring the official S/B/M/L MedNeXt presets, but
-    truncated to the encoder-only block_counts/exp_r (first 5 entries) and
-    with n_channels overridden to 64 by default so the enc_block_3 / bottleneck
-    outputs come out to 512 / 1024 channels -- matching what the surrounding
-    PNSPlusNetwork.py decoder (LightRFB / squeeze / up_sample_*) already expects.
+    Factory that returns the full MedNeXt (encoder + decoder weights) with
+    deep_supervision=False. PNSPlusNetwork drives it layer-by-layer using only
+    the encoder half (stem, enc_block_0..3, down_0..3, bottleneck); the decoder
+    weights exist but are never called.
+
+    n_channels=64 is intentional: channel progression 64->128->256->512->1024
+    so enc_block_3 outputs 512 and bottleneck outputs 1024, matching the
+    channel counts expected by PNSPlusNetwork's LightRFB / up_sample_* layers.
+    (The official MedNeXt presets use n_channels=32, which gives 256/512 -- wrong here.)
     """
     presets = {
-        'S': dict(exp_r=[2, 2, 2, 2, 2],          block_counts=[2, 2, 2, 2, 2],          checkpoint_style=None),
-        'B': dict(exp_r=[2, 3, 4, 4, 4],          block_counts=[2, 2, 2, 2, 2],          checkpoint_style=None),
-        'M': dict(exp_r=[2, 3, 4, 4, 4],          block_counts=[3, 4, 4, 4, 4],          checkpoint_style='outside_block'),
-        'L': dict(exp_r=[3, 4, 8, 8, 8],          block_counts=[3, 4, 8, 8, 8],          checkpoint_style='outside_block'),
+        'S': dict(exp_r=2,                     block_counts=[2,2,2,2,2,2,2,2,2], checkpoint_style=None),
+        'B': dict(exp_r=[2,3,4,4,4,4,4,3,2],  block_counts=[2,2,2,2,2,2,2,2,2], checkpoint_style=None),
+        'M': dict(exp_r=[2,3,4,4,4,4,4,3,2],  block_counts=[3,4,4,4,4,4,4,4,3], checkpoint_style='outside_block'),
+        'L': dict(exp_r=[3,4,8,8,8,8,8,4,3],  block_counts=[3,4,8,8,8,8,8,4,3], checkpoint_style='outside_block'),
     }
     cfg = presets[model_id]
-    return MedNeXtEncoder(
+    return MedNeXt(
         in_channels=in_channels,
         n_channels=n_channels,
+        n_classes=1,
         exp_r=cfg['exp_r'],
         kernel_size=kernel_size,
+        deep_supervision=False,
         do_res=True,
         do_res_up_down=True,
         checkpoint_style=cfg['checkpoint_style'],
         block_counts=cfg['block_counts'],
         norm_type='group',
         dim=dim,
-        grn=False
+        grn=False,
     )
+#contributie

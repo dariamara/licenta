@@ -9,6 +9,9 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils import data
+# contributie start
+from torch.cuda.amp import autocast, GradScaler
+# contributie end
 
 from config import config
 from lib.dataloader.dataloader import get_video_dataset
@@ -34,7 +37,11 @@ class MixedLoss(nn.Module):
         pred, target = tuple(inputs)
         pred = pred.squeeze()
         target = target.squeeze()
-        cross_entropy_loss = F.binary_cross_entropy(pred, target.float())
+        # cross_entropy_loss = F.binary_cross_entropy(pred, target.float())
+        # contributie start
+        with autocast(enabled=False):
+            cross_entropy_loss = F.binary_cross_entropy(pred.float(), target.float())
+        # contributie end
         eps = 1e-14
         preds = pred > 0.5
         intersection = (preds * target).sum()
@@ -73,10 +80,18 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             images = images.cuda()
             gts = gts.cuda()
             
-            preds = model(images)
-            
-            loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
-            loss.backward()
+            # preds = model(images)
+            #
+            # loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
+            # loss.backward()
+
+            # contributie start
+            with autocast():
+                preds = model(images)
+                loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
+
+            scaler.scale(loss).backward()
+            # contributie end
 
             eval_preds = preds.contiguous().view(*(gts.shape))
 
@@ -87,6 +102,9 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
                     size += 1
 
             #clip_gradient(optimizer, config.clip)
+            # contributie start
+            scaler.unscale_(optimizer)
+            # contributie end
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.clip)
 
             # backbone_norm = 0
@@ -106,7 +124,11 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             # backbone_grad_norms.append(backbone_norm)
             # head_grad_norms.append(head_norm)
 
-            optimizer.step()
+            # optimizer.step()
+            # contributie start
+            scaler.step(optimizer)
+            scaler.update()
+            # contributie end
 
             step += 1
             epoch_step += 1
@@ -252,6 +274,10 @@ if __name__ == '__main__':
     optimizer = torch.optim.AdamW([
         {'params': backbone_params, 'lr': config.backbone_lr, 'weight_decay': config.backbone_weight_decay, 'name': 'backbone_params'},
         {'params': head_params, 'lr': config.head_lr, 'weight_decay': config.head_weight_decay, 'name': 'head_params'}])
+
+    # contributie start
+    scaler = GradScaler()
+    # contributie end
     
     save_path = config.save_path
     if not os.path.exists(save_path):
