@@ -7,8 +7,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--gpu_id', type=str, default='0, 1', help='train use gpu')
 parser.add_argument('--lr_mode', type=str, default="poly")
 # contributie start
-# MedNeXt trains from scratch (no pretrained weights), so backbone needs a higher LR than ConvNeXt's 3e-5
-parser.add_argument('--backbone_lr', type=float, default=2e-4)
+# MedNeXt trains from scratch (no pretrained weights), so backbone needs a higher LR than ConvNeXt's 3e-5.
+# Reduced from 2e-4 to 1e-4: fp16 activations in the 1024-channel bottleneck overflow with too high an LR.
+parser.add_argument('--backbone_lr', type=float, default=1e-4)
 # contributie end
 parser.add_argument('--head_lr', type=float, default=1e-3)
 parser.add_argument('--backbone_weight_decay', type=float, default=1e-8)

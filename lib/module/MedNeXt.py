@@ -422,7 +422,7 @@ def create_mednext_encoder(model_id, in_channels=3, n_channels=64, kernel_size=3
         do_res_up_down=True,
         checkpoint_style=cfg['checkpoint_style'],
         block_counts=cfg['block_counts'],
-        norm_type='group',
+        norm_type='layer',
         dim=dim,
         grn=False,
     )

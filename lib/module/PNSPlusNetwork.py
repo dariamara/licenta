@@ -220,6 +220,8 @@ class PNSNet(nn.Module):
                           align_corners=False))
 
         #contributie
+        # nan_to_num must come before clamp: clamp(NaN) = NaN in PyTorch, so NaN would still reach BCE
+        out = torch.nan_to_num(out, nan=0.5, posinf=1.0, neginf=0.0)
         out = out.clamp(min=1e-7, max=1 - 1e-7)
         #contributie
 

@@ -234,7 +234,13 @@ class LayerNorm(nn.Module):
             u = x.mean(1, keepdim=True)
             s = (x - u).pow(2).mean(1, keepdim=True)
             x = (x - u) / torch.sqrt(s + self.eps)
-            x = self.weight[:, None, None, None] * x + self.bias[:, None, None, None]
+            #contributie
+            # Original hardcodes [:, None, None, None] which only works for 3D (5D tensors).
+            # For 2D (4D tensors) this misaligns weight against the batch dim instead of channel dim.
+            w = self.weight.view([1, -1] + [1] * (x.ndim - 2))
+            b = self.bias.view([1, -1] + [1] * (x.ndim - 2))
+            x = w * x + b
+            #contributie
             return x
 
 
