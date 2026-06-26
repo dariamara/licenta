@@ -219,6 +219,10 @@ class PNSNet(nn.Module):
             F.interpolate(self.SegNIN(out), size=(origin_shape[-2], origin_shape[-1]), mode="bilinear",
                           align_corners=False))
 
+        #contributie
+        out = out.clamp(min=1e-7, max=1 - 1e-7)
+        #contributie
+
         return out
 
 
