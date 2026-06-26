@@ -9,6 +9,9 @@ from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
 # from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
 from lib.module.KAN import KANBlock, PatchEmbed
+#contributie
+from lib.module.ConvNeXtV2 import convnextv2_base
+#contributie
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -57,6 +60,9 @@ class PNSNet(nn.Module):
     def __init__(self, bn_out, use_kan):
         super(PNSNet, self).__init__()
         # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
+        #contributie
+        self.feature_extractor = convnextv2_base(pretrained=True, in_22k=True, num_classes=21841, drop_path_rate=0.2)
+        #contributie
         self.High_RFB = LightRFB(channels_in=1024)
         self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
 
@@ -109,6 +115,21 @@ class PNSNet(nn.Module):
         # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
         #
         # high_feature = self.feature_extractor.stages[3](high_feature)
+
+        #contributie
+        x = self.feature_extractor.downsample_layers[0](x)
+        x = self.feature_extractor.stages[0](x)
+
+        x = self.feature_extractor.downsample_layers[1](x)
+        x = self.feature_extractor.stages[1](x)
+
+        # Extract anchor, low-level, and high-level features.
+        low_feature = self.feature_extractor.downsample_layers[2](x)
+        low_feature = self.feature_extractor.stages[2](low_feature)
+
+        high_feature = self.feature_extractor.downsample_layers[3](low_feature)
+        high_feature = self.feature_extractor.stages[3](high_feature)
+        #contributie
 
         if self.use_kan:
             high_feature, H, W = self.patch_embed_h_1(high_feature)
@@ -189,6 +210,8 @@ class PNSNet(nn.Module):
 
 
 if __name__ == "__main__":
+    #contributie
     a = torch.randn(1, 6, 3, 256, 448).cuda()
-    mobile = PNSNet().cuda()
+    mobile = PNSNet(bn_out=(16, 28), use_kan=False).cuda()
     print(mobile(a).shape)
+    #contributie
