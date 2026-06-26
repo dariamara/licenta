@@ -4,7 +4,9 @@ import math
 import torch.nn as nn
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
-__all__ = ['KANBlock', 'PatchEmbed']
+#contributie
+__all__ = ['KANBlock', 'PatchEmbed', 'ConvLayer', 'D_ConvLayer']
+#contributie
 
 class KANLinear(torch.nn.Module):
     def __init__(
@@ -475,3 +477,37 @@ class PatchEmbed(nn.Module):
         x = self.norm(x)
 
         return x, H, W
+
+
+#contributie
+class ConvLayer(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super(ConvLayer, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, input):
+        return self.conv(input)
+
+
+class D_ConvLayer(nn.Module):
+    def __init__(self, in_ch, out_ch):
+        super(D_ConvLayer, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, in_ch, 3, padding=1),
+            nn.BatchNorm2d(in_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, input):
+        return self.conv(input)
+#contributie

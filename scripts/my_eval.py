@@ -84,7 +84,9 @@ if __name__ == '__main__':
     model_path = config.pth_path
     print('Load checkpoint:', model_path)
     logging.info('Load checkpoint: {}'.format(model_path))
-    model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan=config.use_kan).cuda()
+    #contributie
+    model = Network(bn_out=(config.size[0] // 8, config.size[1] // 8)).cuda()
+    #contributie
     model = nn.DataParallel(model)
 
     state_dict = torch.load(model_path, map_location=torch.device('cuda:0'))
