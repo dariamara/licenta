@@ -496,6 +496,12 @@ class SwinBackbone(nn.Module):
         # Layer norms applied before reshaping to spatial maps
         self.norm_low  = norm_layer(int(embed_dim * 4))  # 512 for Swin-B
         self.norm_high = norm_layer(int(embed_dim * 8))  # 1024 for Swin-B
+        #contributie
+        # Extra norms for the two shallow skip features exposed for the U-KAN decoder.
+        # These are applied to the pre-PatchMerging tokens of stages 0 and 1.
+        self.norm_feat0 = norm_layer(int(embed_dim))          # 128 for Swin-B
+        self.norm_feat1 = norm_layer(int(embed_dim * 2))      # 256 for Swin-B
+        #contributie
 
         self.apply(self._init_weights)
 
@@ -521,8 +527,10 @@ class SwinBackbone(nn.Module):
         Args:
             x: (B, 3, H, W)
         Returns:
+            feat0:        (B, embed_dim,    H/4,  W/4)   — 128-ch for Swin-B  (pre-merge skip)
+            feat1:        (B, embed_dim*2,  H/8,  W/8)   — 256-ch for Swin-B  (pre-merge skip)
             low_feature:  (B, embed_dim*4,  H/16, W/16)  — 512-ch for Swin-B
-            high_feature: (B, embed_dim*8, H/32, W/32)   — 1024-ch for Swin-B
+            high_feature: (B, embed_dim*8,  H/32, W/32)  — 1024-ch for Swin-B
         """
         B = x.shape[0]
 
@@ -531,11 +539,36 @@ class SwinBackbone(nn.Module):
             x = x + self.absolute_pos_embed
         x = self.pos_drop(x)
 
-        x = self.layers[0](x)            # (B, Ph/2 * Pw/2, 2C)   after PatchMerging
-        x = self.layers[1](x)            # (B, Ph/4 * Pw/4, 4C)   after PatchMerging
+        pr = self.patches_resolution     # e.g. [56, 112]
+
+        #contributie
+        # Stage 0 — run transformer blocks, capture pre-merge tokens as feat0,
+        # then apply PatchMerging separately to continue the Swin pipeline.
+        for blk in self.layers[0].blocks:
+            if self.layers[0].use_checkpoint:
+                x = checkpoint.checkpoint(blk, x)
+            else:
+                x = blk(x)
+        H0, W0 = pr[0], pr[1]           # 56, 112
+        feat0 = self.norm_feat0(x).transpose(1, 2).view(B, -1, H0, W0)
+        # (B, 128, 56, 112) for Swin-B with img_size=(224,448)
+        if self.layers[0].downsample is not None:
+            x = self.layers[0].downsample(x)
+
+        # Stage 1 — same pattern: blocks → feat1 → downsample.
+        for blk in self.layers[1].blocks:
+            if self.layers[1].use_checkpoint:
+                x = checkpoint.checkpoint(blk, x)
+            else:
+                x = blk(x)
+        H1, W1 = pr[0] // 2, pr[1] // 2  # 28, 56
+        feat1 = self.norm_feat1(x).transpose(1, 2).view(B, -1, H1, W1)
+        # (B, 256, 28, 56) for Swin-B with img_size=(224,448)
+        if self.layers[1].downsample is not None:
+            x = self.layers[1].downsample(x)
+        #contributie
 
         # --- low_feature: 1/16 of input, embed_dim*4 channels ---
-        pr = self.patches_resolution
         H_low = pr[0] // 4               # e.g. 56//4 = 14
         W_low = pr[1] // 4               # e.g. 112//4 = 28
         low_feature = self.norm_low(x).transpose(1, 2).view(B, -1, H_low, W_low)
@@ -550,7 +583,9 @@ class SwinBackbone(nn.Module):
         high_feature = self.norm_high(x).transpose(1, 2).view(B, -1, H_high, W_high)
         # (B, 1024, 7, 14) for Swin-B with img_size=(224,448)
 
-        return low_feature, high_feature
+        #contributie
+        return feat0, feat1, low_feature, high_feature
+        #contributie
 
     def load_pretrained(self, checkpoint_path):
         """Load ImageNet-22k pretrained weights, ignoring the classification head."""

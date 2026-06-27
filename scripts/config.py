@@ -56,6 +56,16 @@ parser.add_argument('--save_path_preds', type=str, default="/storage/datasets/pr
 parser.add_argument('--use_kan', action='store_true', help='Use KAN blocks')
 
 #contributie
+# no_kan: replace KANLinear with nn.Linear in all KANLayer/KANBlock instances
+# (keeps architecture identical but disables spline activations — useful for ablation).
+parser.add_argument('--no_kan', action='store_true', help='Replace KANLinear with nn.Linear (ablation)')
+# Separate learning-rate schedule for KAN parameters (spline weights benefit from a
+# higher initial LR than the rest of the head).
+parser.add_argument('--kan_lr', type=float, default=1e-2, help='Learning rate for KAN parameters')
+parser.add_argument('--kan_weight_decay', type=float, default=1e-4, help='Weight decay for KAN parameters')
+#contributie
+
+#contributie
 parser.add_argument('--swin_pretrained', type=str, default='',
                     help='Path to Swin-B ImageNet-22k pretrained checkpoint '
                          '(swin_base_patch4_window7_224_22k.pth)')

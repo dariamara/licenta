@@ -69,6 +69,8 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             #contributie
             # backbone_no_wd follows the same lr schedule but keeps weight_decay=0
             adjust_lr_step(optimizer, schedule_backbone[lr_idx], 'backbone_no_wd')
+            # KAN parameters use their own cosine schedule (higher base lr)
+            adjust_lr_step(optimizer, schedule_kan[lr_idx], 'kan_params')
             #contributie
             adjust_lr_step(optimizer, schedule_head[lr_idx], 'head_params')
 
@@ -123,8 +125,9 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
                     '[Train Info]:Epoch [{:03d}/{:03d}], Step [{:04d}/{:04d}], Total_loss: {:.4f}'.
                     format(epoch, config.epoches, i, total_step, loss.data))
                 #contributie
-                # group[0]=backbone_params, group[1]=backbone_no_wd, group[2]=head_params
-                cur_lr = optimizer.param_groups[2]['lr']
+                # group[0]=backbone_params, group[1]=backbone_no_wd,
+                # group[2]=kan_params, group[3]=head_params
+                cur_lr = optimizer.param_groups[3]['lr']
                 back_lr = optimizer.param_groups[0]['lr']
                 #contributie
 
@@ -236,9 +239,14 @@ if __name__ == '__main__':
 
     #contributie
     # bn_out drives the LayerNorm shape inside NS_Block.
-    # With size=(224,448): bn_out=(14,28) = spatial size of high_feature after High_RFB.
-    # (224/16=14, 448/16=28 — features are at 1/16 scale after up_sample_high stride=2)
-    model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan = config.use_kan).cuda()
+    # With size=(224,448): bn_out=(14,28) = spatial size after up_sample_high (stride=2)
+    # applied to feat3 (7×14) → 14×28, which is H/16 × W/16.
+    model = Network(
+        bn_out=(config.size[0] // 16, config.size[1] // 16),
+        use_kan=config.use_kan,
+        no_kan=config.no_kan,
+    ).cuda()
+    #contributie
     model = nn.DataParallel(model)
 
     cudnn.benchmark = True
@@ -254,15 +262,24 @@ if __name__ == '__main__':
     #contributie
 
     #contributie
-    # Separate backbone (Swin) and head parameters for differential learning rates.
-    # Swin parameters that should have zero weight decay are handled by the
-    # no_weight_decay() / no_weight_decay_keywords() methods on SwinBackbone;
-    # here we use a single group per component to keep the optimizer simple.
-    backbone_params = []
+    # Three-way parameter split:
+    #   backbone_params / backbone_no_wd_params — Swin Transformer weights
+    #   kan_params   — KAN bottleneck + decoder KAN blocks (higher LR for spline weights)
+    #   head_params  — remaining decoder convs, NS_Block, squeeze, expand_temporal, etc.
+    #
+    # KAN modules are identified by their parameter name containing one of the
+    # canonical substrings below.  This matches block1, dblock1, dblock2, norm3,
+    # dnorm1, dnorm2 regardless of DataParallel module prefix.
+    KAN_NAME_TOKENS = ('block1', 'dblock1', 'dblock2', 'norm3', 'dnorm1', 'dnorm2')
+
+    backbone_params      = []
     backbone_no_wd_params = []
-    head_params = []
-    no_wd_names = model.module.feature_extractor.no_weight_decay()
+    kan_params           = []
+    head_params          = []
+
+    no_wd_names    = model.module.feature_extractor.no_weight_decay()
     no_wd_keywords = model.module.feature_extractor.no_weight_decay_keywords()
+
     for name, param in model.named_parameters():
         if name.startswith("module.feature_extractor"):
             bare_name = name[len("module.feature_extractor."):]
@@ -272,6 +289,8 @@ if __name__ == '__main__':
                 backbone_no_wd_params.append(param)
             else:
                 backbone_params.append(param)
+        elif any(tok in name for tok in KAN_NAME_TOKENS):
+            kan_params.append(param)
         else:
             head_params.append(param)
     #contributie
@@ -279,11 +298,13 @@ if __name__ == '__main__':
     #contributie
     print('Nr. backbone params (with wd)   : {:05d}'.format(len(backbone_params)))
     print('Nr. backbone params (no wd)     : {:05d}'.format(len(backbone_no_wd_params)))
+    print('Nr. KAN params                  : {:05d}'.format(len(kan_params)))
     print('Nr. head params                 : {:05d}'.format(len(head_params)))
 
     optimizer = torch.optim.AdamW([
         {'params': backbone_params,       'lr': config.backbone_lr, 'weight_decay': config.backbone_weight_decay, 'name': 'backbone_params'},
         {'params': backbone_no_wd_params, 'lr': config.backbone_lr, 'weight_decay': 0.0,                         'name': 'backbone_no_wd'},
+        {'params': kan_params,            'lr': config.kan_lr,      'weight_decay': config.kan_weight_decay,      'name': 'kan_params'},
         {'params': head_params,           'lr': config.head_lr,     'weight_decay': config.head_weight_decay,     'name': 'head_params'},
     ])
     #contributie
@@ -312,10 +333,16 @@ if __name__ == '__main__':
 
     min_lr_head = 5e-5
     min_lr_backbone = 1e-7
+    #contributie
+    min_lr_kan = 1e-4   # floor for KAN spline LR (10× lower than kan_lr default)
+    #contributie
 
     restart_epochs = 1
 
     schedule_backbone = cosine_scheduler(config.backbone_lr, min_lr_backbone, 2, config.epoches, total_step)
+    #contributie
+    schedule_kan  = cosine_scheduler(config.kan_lr, min_lr_kan, 4, config.epoches, total_step)
+    #contributie
     schedule_head = cosine_scheduler(config.head_lr, min_lr_head , 4, config.epoches, total_step)
 
     val_loader = get_video_dataset(config.val_split)
