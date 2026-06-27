@@ -13,7 +13,9 @@ from torch.utils import data
 from config import config
 from lib.dataloader.dataloader import get_video_dataset
 from lib.module.EMA import EMA
-from lib.module.PNSPlusNetwork import PNSNet as Network
+# contributie
+# Network import is done conditionally inside __main__ based on --use_ukan flag.
+# contributie
 from lib.utils.utils import cosine_scheduler, adjust_lr_step
 
 
@@ -227,9 +229,21 @@ if __name__ == '__main__':
     # torch.manual_seed(seed)
     # torch.cuda.manual_seed_all(seed)
 
-    # 3contributie
-    model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan=config.use_kan, use_maxvit=config.use_maxvit).cuda()
-    # 3contributie
+    # contributie
+    if config.use_ukan:
+        from lib.module.MaxViTUKAN import MaxViTUKAN as Network
+        model = Network(
+            img_size=config.size,
+            video_time_clips=config.video_time_clips,
+        ).cuda()
+    else:
+        from lib.module.PNSPlusNetwork import PNSNet as Network
+        model = Network(
+            bn_out=(config.size[0] // 16, config.size[1] // 16),
+            use_kan=config.use_kan,
+            use_maxvit=config.use_maxvit,
+        ).cuda()
+    # contributie
     model = nn.DataParallel(model)
 
     cudnn.benchmark = True
@@ -241,11 +255,15 @@ if __name__ == '__main__':
 
     backbone_params = []
     head_params = []
+    # contributie
+    # "module.feature_extractor" → PNSNet backbone
+    # "module.backbone"          → MaxViTUKAN backbone (MaxViTBackbone)
     for name, param in model.named_parameters():
-        if name.startswith("module.feature_extractor"):
+        if name.startswith("module.feature_extractor") or name.startswith("module.backbone"):
             backbone_params.append(param)
         else:
             head_params.append(param)
+    # contributie
 
     print('Nr. backbone params: {:03d}'.format(len(backbone_params)))
     print('Nr. head params: {:03d}'.format(len(head_params)))

@@ -50,6 +50,8 @@ parser.add_argument('--save_path_preds', type=str, default="/storage/datasets/pr
 parser.add_argument('--use_kan', action='store_true', help='Use KAN blocks')
 # 3contributie
 parser.add_argument('--use_maxvit', action='store_true', default=True, help='Use MaxViT backbone')
-# 3contributie
+# contributie
+parser.add_argument('--use_ukan', action='store_true', help='Use full U-KAN decoder with MaxViT backbone (MaxViTUKAN)')
+# contributie
 
 config = parser.parse_args()
