@@ -1,197 +1,167 @@
-import numpy as np
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from lib.module.LightRFB import LightRFB
-from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
-# from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
-from lib.module.KAN import KANBlock, PatchEmbed
 #contributie
+from lib.module.KAN import KANBlock, D_ConvLayer
 from lib.module.MSCAN import create_mscan_encoder
-#contributie
-
-class conbine_feature(nn.Module):
-    def __init__(self):
-        super(conbine_feature, self).__init__()
-        self.up2_high = DilatedParallelConvBlockD2(32, 16)
-        self.up2_low = nn.Conv2d(24, 16, 1, stride=1, padding=0, bias=False)
-        self.up2_bn2 = nn.GroupNorm(2, 16)
-        self.up2_act = nn.Mish()
-        self.refine = nn.Sequential(nn.Conv2d(16, 16, 3, padding=1, bias=False), nn.GroupNorm(2, 16), nn.Mish())
-
-    def forward(self, low_fea, high_fea):
-        high_fea = self.up2_high(high_fea)
-        low_fea = self.up2_bn2(self.up2_low(low_fea))
-        refine_feature = self.refine(self.up2_act(high_fea + low_fea))
-        return refine_feature
-
-
-class DilatedParallelConvBlockD2(nn.Module):
-    def __init__(self, nIn, nOut, add=False):
-        super(DilatedParallelConvBlockD2, self).__init__()
-        n = int(np.ceil(nOut / 2.))
-        n2 = nOut - n
-
-        self.conv0 = nn.Conv2d(nIn, nOut, 1, stride=1, padding=0, dilation=1, bias=False)
-        self.conv1 = nn.Conv2d(n, n, 3, stride=1, padding=1, dilation=1, bias=False)
-        self.conv2 = nn.Conv2d(n2, n2, 3, stride=1, padding=2, dilation=2, bias=False)
-
-        self.bn = nn.GroupNorm(nOut // 16, nOut)
-        self.add = add
-
-    def forward(self, input):
-        in0 = self.conv0(input)
-        in1, in2 = torch.chunk(in0, 2, dim=1)
-        b1 = self.conv1(in1)
-        b2 = self.conv2(in2)
-        output = torch.cat([b1, b2], dim=1)
-
-        if self.add:
-            output = input + output
-        output = self.bn(output)
-
-        return output
 
 
 class PNSNet(nn.Module):
-    def __init__(self, bn_out, use_kan):
+    """
+    SegNeXt-encoded U-KAN video model.
+
+    Encoder  : MSCAN-small backbone (4 scales).
+    Bottleneck: U-KAN tokenised-KAN block at 512 ch (stride-32).
+    Temporal  : squeeze 512→32 → NS-Block global/local → expand 32→512.
+    Decoder   : U-KAN KAN-augmented decoder with skip connections from MSCAN
+                feats[2] (320 ch), feats[1] (128 ch), feats[0] (64 ch).
+
+    Input  : (B, 6, 3, H, W)
+    Output : (B*5, 1, H, W)  — frame 0 is used as global reference only.
+    """
+
+    def __init__(self, bn_out, use_kan=True):
         super(PNSNet, self).__init__()
-        # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
-        #contributie
-        # MSCAN 'small': out[1]=128ch stride-8 (low), out[2]=320ch stride-16 (high).
-        # Adapters project to the 512/1024 channel contract the rest of PNSNet expects.
+        no_kan = not use_kan
+
+        # MSCAN backbone
+        # outputs: [64@s4, 128@s8, 320@s16, 512@s32] for 'small' variant
         self.feature_extractor = create_mscan_encoder(variant='small', in_chans=3, drop_path_rate=0.1)
-        self.low_adapt  = nn.Conv2d(128,  512,  kernel_size=1, bias=False)
-        self.high_adapt = nn.Conv2d(320, 1024,  kernel_size=1, bias=False)
-        #contributie
-        self.High_RFB = LightRFB(channels_in=1024)
-        self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
 
-        self.High_drop = nn.Dropout2d(0.5)
-        self.Low_drop = nn.Dropout2d(0.5)
+        # drop-path rates spread across the 3 KAN blocks (bottleneck + 2 decoder)
+        dpr = [x.item() for x in torch.linspace(0, 0.1, 3)]
 
-        self.squeeze = nn.Sequential(nn.Conv2d(1024, 32, 1), nn.GroupNorm(2, 32), nn.Mish(inplace=True))
-        self.decoder = conbine_feature()
-        self.SegNIN = nn.Sequential(nn.Dropout2d(0.1), nn.Conv2d(16, 1, kernel_size=1, bias=False))
-        self.NSB_global = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[3, 4, 3, 4])
-        self.NSB_local = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[1, 2, 1, 2])
-        self.up_sample_low = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
-        self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
+        # U-KAN bottleneck — tokenised KAN at 512 ch
+        self.norm_bot  = nn.LayerNorm(512)
+        self.block_bot = nn.ModuleList([
+            KANBlock(dim=512, drop=0., drop_path=dpr[0], no_kan=no_kan)
+        ])
 
-        self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
-        
-        self.block_h_1 = nn.ModuleList([KANBlock(
-            dim=1024
-            )])
+        # Squeeze 512→32 for the temporal NS-Block
+        self.squeeze = nn.Sequential(
+            nn.Conv2d(512, 32, 1),
+            nn.GroupNorm(2, 32),
+            nn.Mish(inplace=True),
+        )
+        # Expand 32→512 to re-enter the U-KAN decoder
+        self.expand = nn.Conv2d(32, 512, 1, bias=False)
 
-        self.block_h_2 = nn.ModuleList([KANBlock(
-            dim=32
-            )])
-        
-        self.norm_h_1 = nn.LayerNorm(1024)
-        
-        self.norm_h_2 = nn.LayerNorm(32)
+        # Temporal NS-Blocks (operate at 32 ch, stride-32 spatial resolution)
+        self.NSB_global = NS_Block(bn_out=bn_out, channels_in=32,
+                                   radius=[3, 3, 3, 3], dilation=[3, 4, 3, 4])
+        self.NSB_local  = NS_Block(bn_out=bn_out, channels_in=32,
+                                   radius=[3, 3, 3, 3], dilation=[1, 2, 1, 2])
 
+        # U-KAN decoder stage 1: 512→320, skip with feats[2] (320 ch @ stride-16)
+        self.decoder1 = D_ConvLayer(512, 320)
+        self.dblock1  = nn.ModuleList([
+            KANBlock(dim=320, drop=0., drop_path=dpr[1], no_kan=no_kan)
+        ])
+        self.dnorm1 = nn.LayerNorm(320)
+
+        # U-KAN decoder stage 2: 320→128, skip with feats[1] (128 ch @ stride-8)
+        self.decoder2 = D_ConvLayer(320, 128)
+        self.dblock2  = nn.ModuleList([
+            KANBlock(dim=128, drop=0., drop_path=dpr[2], no_kan=no_kan)
+        ])
+        self.dnorm2 = nn.LayerNorm(128)
+
+        # U-KAN decoder stages 3-5: plain conv, skip with feats[0] (64 ch @ stride-4)
+        self.decoder3 = D_ConvLayer(128, 64)
+        self.decoder4 = D_ConvLayer(64, 32)
+        self.decoder5 = D_ConvLayer(32, 16)
+
+        self.final   = nn.Conv2d(16, 1, kernel_size=1)
         self.use_kan = use_kan
 
     def forward(self, x):
+        origin_shape = x.shape                    # (B, 6, 3, H, W)
+        x = x.view(-1, *origin_shape[2:])         # (B*6, 3, H, W)
 
-        origin_shape = x.shape
-        x = x.view(-1, *origin_shape[2:])
+        # ── Encoder ──────────────────────────────────────────────────────────
+        feats = self.feature_extractor(x)
+        t1  = feats[0]   # (B*6,  64, H/4,  W/4)
+        t2  = feats[1]   # (B*6, 128, H/8,  W/8)
+        t3  = feats[2]   # (B*6, 320, H/16, W/16)
+        bot = feats[3]   # (B*6, 512, H/32, W/32)
 
-        B = x.shape[0]
+        # ── U-KAN tokenised bottleneck ────────────────────────────────────────
+        B_tok, _, H_tok, W_tok = bot.shape
+        out = bot.flatten(2).transpose(1, 2)      # (B*6, H*W tokens, 512)
+        for blk in self.block_bot:
+            out = blk(out, H_tok, W_tok)
+        out = self.norm_bot(out)
+        out = (out.reshape(B_tok, H_tok, W_tok, -1)
+                  .permute(0, 3, 1, 2).contiguous())  # (B*6, 512, H/32, W/32)
 
-        #contributie
-        # MSCAN returns [stride-4, stride-8, stride-16, stride-32] feature maps.
-        # We use index 1 (stride-8) as low_feature and index 2 (stride-16) as high_feature,
-        # then project to the 512/1024 channels the rest of PNSNet expects.
-        feats        = self.feature_extractor(x)
-        low_feature  = self.low_adapt(feats[1])   # (B, 512,  H/8,  W/8)
-        high_feature = self.high_adapt(feats[2])  # (B, 1024, H/16, W/16)
-        #contributie
+        # ── Temporal NS-Block ─────────────────────────────────────────────────
+        out_32 = self.squeeze(out)                # (B*6, 32, H/32, W/32)
+        out_32 = out_32.view(*origin_shape[:2], *out_32.shape[1:])  # (B, 6, 32, ...)
 
-        if self.use_kan:
-            high_feature, H, W = self.patch_embed_h_1(high_feature)
-            for i, blk in enumerate(self.block_h_1):
-                high_feature = blk(high_feature, H, W)
-            high_feature = self.norm_h_1(high_feature)
-            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+        high_global = out_32[:, 0, ...].unsqueeze(1).repeat(1, 6, 1, 1, 1)  # (B, 6, 32, ...)
+        high_local  = out_32[:, 1:7, ...]                                    # (B, 5, 32, ...)
 
-        high_feature = self.up_sample_high(high_feature)
+        high_1 = self.NSB_global(high_global, high_local) + high_local
+        high_2 = self.NSB_local(high_1, high_1) + high_1
+        out_32 = (high_2 + high_local).contiguous()                          # (B, 5, 32, ...)
+        out_32 = out_32.view(-1, *out_32.shape[2:])                          # (B*5, 32, H/32, W/32)
 
-        high_feature = self.High_RFB(high_feature)
+        # Expand back to 512 ch for the U-KAN decoder
+        out = self.expand(out_32)                 # (B*5, 512, H/32, W/32)
 
-        high_feature_H, high_feature_W = high_feature.shape[2:4]
+        # Align skip tensors to the 5 local frames (drop the global reference frame)
+        B = origin_shape[0]
+        t3 = t3[B:]   # (B*5, 320, H/16, W/16)
+        t2 = t2[B:]   # (B*5, 128, H/8,  W/8)
+        t1 = t1[B:]   # (B*5,  64, H/4,  W/4)
 
-        t_h = high_feature
+        # ── U-KAN decoder stage 1: 512→320, skip +t3, KAN block ──────────────
+        out = F.relu(F.interpolate(self.decoder1(out),
+                                   scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = torch.add(out, t3)
+        _, _, H_d1, W_d1 = out.shape
+        out = out.flatten(2).transpose(1, 2)
+        for blk in self.dblock1:
+            out = blk(out, H_d1, W_d1)
+        out = self.dnorm1(out)
+        out = (out.reshape(-1, H_d1, W_d1, 320)
+                  .permute(0, 3, 1, 2).contiguous())
 
-        low_feature = self.up_sample_low(low_feature)
+        # ── U-KAN decoder stage 2: 320→128, skip +t2, KAN block ──────────────
+        out = F.relu(F.interpolate(self.decoder2(out),
+                                   scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = torch.add(out, t2)
+        _, _, H_d2, W_d2 = out.shape
+        out = out.flatten(2).transpose(1, 2)
+        for blk in self.dblock2:
+            out = blk(out, H_d2, W_d2)
+        out = self.dnorm2(out)
+        out = (out.reshape(-1, H_d2, W_d2, 128)
+                  .permute(0, 3, 1, 2).contiguous())
 
+        # ── U-KAN decoder stages 3-5: conv only, skip +t1 at stage 3 ─────────
+        out = F.relu(F.interpolate(self.decoder3(out),
+                                   scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = torch.add(out, t1)
 
-        # Reduce the channel dimension.
-        low_feature = self.Low_RFB(low_feature)
-
-        # Reshape into temporal formation.
-        high_feature = high_feature.view(*origin_shape[:2], *high_feature.shape[1:])
-        low_feature = low_feature.view(*origin_shape[:2], *low_feature.shape[1:])
-
-
-        # Feature Separation.
-        high_feature_global = high_feature[:, 0, ...].unsqueeze(dim=1).repeat(1, 6, 1, 1, 1)
-        high_feature_local = high_feature[:, 1:7, ...]
-        low_feature = low_feature[:, 1:7, ...]
-
-
-        # First NS Block.
-        high_feature_1 = self.NSB_global(high_feature_global, high_feature_local) + high_feature_local
-        # Second NS Block.
-        high_feature_2 = self.NSB_local(high_feature_1, high_feature_1) + high_feature_1
-
-
-        # Residual Connection.
-        high_feature = high_feature_2 + high_feature_local
-
-
-        # Reshape back into spatial formation.
-        high_feature = high_feature.contiguous().view(-1, *high_feature.shape[2:])
-        low_feature = low_feature.contiguous().view(-1, *low_feature.shape[2:])
-
-        if self.use_kan:
-            B, _, H, W = high_feature.shape
-            high_feature = high_feature.flatten(2).transpose(1,2)
-            for i, blk in enumerate(self.block_h_2):
-                high_feature = blk(high_feature, H, W)
-            high_feature = self.norm_h_2(high_feature)
-            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
-
-            #daria
-            #la train am primit warning ca val default a lui align_corners s-a schimbat din false in true => l-am pus false explicit
-            high_feature = nn.Mish()(F.interpolate(high_feature, size=(high_feature_H, high_feature_W), mode='bilinear', align_corners=False))
-            #end daria
-
-        to_slice = t_h.shape[0] - high_feature.shape[0]
-        
-        high_feature = high_feature + t_h[to_slice:]
-
-        # Resize high-level feature to the same as low-level feature.
-        high_feature = F.interpolate(high_feature, size=(low_feature.shape[-2], low_feature.shape[-1]),
-                                     mode="bilinear",
-                                     align_corners=False)
-
-        # UNet-like decoder.
-        out = self.decoder(low_feature.clone(), high_feature.clone())
+        out = F.relu(F.interpolate(self.decoder4(out),
+                                   scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = F.relu(F.interpolate(self.decoder5(out),
+                                   scale_factor=(2, 2), mode='bilinear', align_corners=False))
 
         out = torch.sigmoid(
-            F.interpolate(self.SegNIN(out), size=(origin_shape[-2], origin_shape[-1]), mode="bilinear",
-                          align_corners=False))
-
-        return out
+            F.interpolate(self.final(out),
+                          size=(origin_shape[-2], origin_shape[-1]),
+                          mode='bilinear', align_corners=False)
+        )
+        return out                                # (B*5, 1, H, W)
+#contributie
 
 
 if __name__ == "__main__":
     a = torch.randn(1, 6, 3, 256, 448).cuda()
-    mobile = PNSNet().cuda()
-    print(mobile(a).shape)
+    model = PNSNet(bn_out=(256 // 32, 448 // 32), use_kan=True).cuda()
+    out = model(a)
+    print(out.shape)   # expect (5, 1, 256, 448)

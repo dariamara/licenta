@@ -227,7 +227,10 @@ if __name__ == '__main__':
     # torch.manual_seed(seed)
     # torch.cuda.manual_seed_all(seed)
 
-    model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan = config.use_kan).cuda()
+    #contributie
+    # NS-Block now operates at stride-32 (U-KAN bottleneck), not stride-16
+    model = Network(bn_out=(config.size[0] // 32, config.size[1] // 32), use_kan = config.use_kan).cuda()
+    #contributie
     model = nn.DataParallel(model)
 
     cudnn.benchmark = True

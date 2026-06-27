@@ -4,7 +4,9 @@ import math
 import torch.nn as nn
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 
-__all__ = ['KANBlock', 'PatchEmbed']
+#contributie
+__all__ = ['KANBlock', 'PatchEmbed', 'DWConv', 'ConvLayer', 'D_ConvLayer']
+#contributie
 
 class KANLinear(torch.nn.Module):
     def __init__(
@@ -283,7 +285,7 @@ class KAN(torch.nn.Module):
         )
 
 class KANLayer(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0., no_kan=False):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -299,42 +301,49 @@ class KANLayer(nn.Module):
         grid_range=[-1, 1]
 
         
-        self.fc1 = KANLinear(
-                    in_features,
-                    hidden_features,
-                    grid_size=grid_size,
-                    spline_order=spline_order,
-                    scale_noise=scale_noise,
-                    scale_base=scale_base,
-                    scale_spline=scale_spline,
-                    base_activation=base_activation,
-                    grid_eps=grid_eps,
-                    grid_range=grid_range,
-                )
-        self.fc2 = KANLinear(
-                    hidden_features,
-                    out_features,
-                    grid_size=grid_size,
-                    spline_order=spline_order,
-                    scale_noise=scale_noise,
-                    scale_base=scale_base,
-                    scale_spline=scale_spline,
-                    base_activation=base_activation,
-                    grid_eps=grid_eps,
-                    grid_range=grid_range,
-                )
-        self.fc3 = KANLinear(
-                    hidden_features,
-                    out_features,
-                    grid_size=grid_size,
-                    spline_order=spline_order,
-                    scale_noise=scale_noise,
-                    scale_base=scale_base,
-                    scale_spline=scale_spline,
-                    base_activation=base_activation,
-                    grid_eps=grid_eps,
-                    grid_range=grid_range,
-                )
+        #contributie
+        if not no_kan:
+            self.fc1 = KANLinear(
+                        in_features,
+                        hidden_features,
+                        grid_size=grid_size,
+                        spline_order=spline_order,
+                        scale_noise=scale_noise,
+                        scale_base=scale_base,
+                        scale_spline=scale_spline,
+                        base_activation=base_activation,
+                        grid_eps=grid_eps,
+                        grid_range=grid_range,
+                    )
+            self.fc2 = KANLinear(
+                        hidden_features,
+                        out_features,
+                        grid_size=grid_size,
+                        spline_order=spline_order,
+                        scale_noise=scale_noise,
+                        scale_base=scale_base,
+                        scale_spline=scale_spline,
+                        base_activation=base_activation,
+                        grid_eps=grid_eps,
+                        grid_range=grid_range,
+                    )
+            self.fc3 = KANLinear(
+                        hidden_features,
+                        out_features,
+                        grid_size=grid_size,
+                        spline_order=spline_order,
+                        scale_noise=scale_noise,
+                        scale_base=scale_base,
+                        scale_spline=scale_spline,
+                        base_activation=base_activation,
+                        grid_eps=grid_eps,
+                        grid_range=grid_range,
+                    )
+        else:
+            self.fc1 = nn.Linear(in_features, hidden_features)
+            self.fc2 = nn.Linear(hidden_features, out_features)
+            self.fc3 = nn.Linear(hidden_features, out_features)
+        #contributie
             
 
 
@@ -386,14 +395,18 @@ class KANLayer(nn.Module):
         return x
 
 class KANBlock(nn.Module):
-    def __init__(self, dim, drop=0., drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+    #contributie
+    def __init__(self, dim, drop=0., drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, no_kan=False):
+    #contributie
         super().__init__()
 
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim)
 
-        self.layer = KANLayer(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
+        #contributie
+        self.layer = KANLayer(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop, no_kan=no_kan)
+        #contributie
 
         self.apply(self._init_weights)
 
@@ -475,3 +488,53 @@ class PatchEmbed(nn.Module):
         x = self.norm(x)
 
         return x, H, W
+
+
+#contributie
+class DWConv(nn.Module):
+    """Depthwise conv operating on tokenized (B, N, C) features."""
+    def __init__(self, dim=768):
+        super(DWConv, self).__init__()
+        self.dwconv = nn.Conv2d(dim, dim, 3, 1, 1, bias=True, groups=dim)
+
+    def forward(self, x, H, W):
+        B, N, C = x.shape
+        x = x.transpose(1, 2).view(B, C, H, W)
+        x = self.dwconv(x)
+        x = x.flatten(2).transpose(1, 2)
+        return x
+
+
+class ConvLayer(nn.Module):
+    """Double conv block used in U-KAN encoder stages."""
+    def __init__(self, in_ch, out_ch):
+        super(ConvLayer, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+class D_ConvLayer(nn.Module):
+    """Double conv block used in U-KAN decoder stages (in→in→out)."""
+    def __init__(self, in_ch, out_ch):
+        super(D_ConvLayer, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_ch, in_ch, 3, padding=1),
+            nn.BatchNorm2d(in_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.conv(x)
+#contributie
