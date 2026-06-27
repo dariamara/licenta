@@ -9,6 +9,9 @@ from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
 # from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
 from lib.module.KAN import KANBlock, PatchEmbed
+#contributie
+from lib.module.MSCAN import create_mscan_encoder
+#contributie
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -57,6 +60,13 @@ class PNSNet(nn.Module):
     def __init__(self, bn_out, use_kan):
         super(PNSNet, self).__init__()
         # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
+        #contributie
+        # MSCAN 'small': out[1]=128ch stride-8 (low), out[2]=320ch stride-16 (high).
+        # Adapters project to the 512/1024 channel contract the rest of PNSNet expects.
+        self.feature_extractor = create_mscan_encoder(variant='small', in_chans=3, drop_path_rate=0.1)
+        self.low_adapt  = nn.Conv2d(128,  512,  kernel_size=1, bias=False)
+        self.high_adapt = nn.Conv2d(320, 1024,  kernel_size=1, bias=False)
+        #contributie
         self.High_RFB = LightRFB(channels_in=1024)
         self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
 
@@ -94,21 +104,14 @@ class PNSNet(nn.Module):
 
         B = x.shape[0]
 
-        #print(x)
-        #print(x.shape)
-        # x = self.feature_extractor.downsample_layers[0](x)
-        # x = self.feature_extractor.stages[0](x)
-        #
-        # x = self.feature_extractor.downsample_layers[1](x)
-        # x = self.feature_extractor.stages[1](x)
-        #
-        # # Extract anchor, low-level, and high-level features.
-        # low_feature = self.feature_extractor.downsample_layers[2](x)
-        # low_feature = self.feature_extractor.stages[2](low_feature)
-        #
-        # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
-        #
-        # high_feature = self.feature_extractor.stages[3](high_feature)
+        #contributie
+        # MSCAN returns [stride-4, stride-8, stride-16, stride-32] feature maps.
+        # We use index 1 (stride-8) as low_feature and index 2 (stride-16) as high_feature,
+        # then project to the 512/1024 channels the rest of PNSNet expects.
+        feats        = self.feature_extractor(x)
+        low_feature  = self.low_adapt(feats[1])   # (B, 512,  H/8,  W/8)
+        high_feature = self.high_adapt(feats[2])  # (B, 1024, H/16, W/16)
+        #contributie
 
         if self.use_kan:
             high_feature, H, W = self.patch_embed_h_1(high_feature)
