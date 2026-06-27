@@ -9,6 +9,9 @@ from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
 # from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
 from lib.module.KAN import KANBlock, PatchEmbed
+# 3contributie
+from lib.module.MaxViTBackbone import MaxViTBackbone
+# 3contributie
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -54,7 +57,7 @@ class DilatedParallelConvBlockD2(nn.Module):
 
 
 class PNSNet(nn.Module):
-    def __init__(self, bn_out, use_kan):
+    def __init__(self, bn_out, use_kan, use_maxvit=True):
         super(PNSNet, self).__init__()
         # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
         self.High_RFB = LightRFB(channels_in=1024)
@@ -86,6 +89,11 @@ class PNSNet(nn.Module):
         self.norm_h_2 = nn.LayerNorm(32)
 
         self.use_kan = use_kan
+        # 3contributie
+        self.use_maxvit = use_maxvit
+        if use_maxvit:
+            self.feature_extractor = MaxViTBackbone()
+        # 3contributie
 
     def forward(self, x):
 
@@ -94,21 +102,13 @@ class PNSNet(nn.Module):
 
         B = x.shape[0]
 
-        #print(x)
-        #print(x.shape)
-        # x = self.feature_extractor.downsample_layers[0](x)
-        # x = self.feature_extractor.stages[0](x)
-        #
-        # x = self.feature_extractor.downsample_layers[1](x)
-        # x = self.feature_extractor.stages[1](x)
-        #
-        # # Extract anchor, low-level, and high-level features.
-        # low_feature = self.feature_extractor.downsample_layers[2](x)
-        # low_feature = self.feature_extractor.stages[2](low_feature)
-        #
-        # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
-        #
-        # high_feature = self.feature_extractor.stages[3](high_feature)
+        # 3contributie
+        if self.use_maxvit:
+            # x: [B*T, 3, H, W]
+            # low_feature:  [B*T, 512,  H/8,  W/8]
+            # high_feature: [B*T, 1024, H/16, W/16]
+            low_feature, high_feature = self.feature_extractor(x)
+        # 3contributie
 
         if self.use_kan:
             high_feature, H, W = self.patch_embed_h_1(high_feature)
