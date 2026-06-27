@@ -66,6 +66,10 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             lr_idx = i + epoch * total_step - 1
 
             adjust_lr_step(optimizer, schedule_backbone[lr_idx], 'backbone_params')
+            #contributie
+            # backbone_no_wd follows the same lr schedule but keeps weight_decay=0
+            adjust_lr_step(optimizer, schedule_backbone[lr_idx], 'backbone_no_wd')
+            #contributie
             adjust_lr_step(optimizer, schedule_head[lr_idx], 'head_params')
 
             #print(images.shape)
@@ -118,8 +122,11 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
                 logging.info(
                     '[Train Info]:Epoch [{:03d}/{:03d}], Step [{:04d}/{:04d}], Total_loss: {:.4f}'.
                     format(epoch, config.epoches, i, total_step, loss.data))
-                cur_lr = optimizer.param_groups[1]['lr']
+                #contributie
+                # group[0]=backbone_params, group[1]=backbone_no_wd, group[2]=head_params
+                cur_lr = optimizer.param_groups[2]['lr']
                 back_lr = optimizer.param_groups[0]['lr']
+                #contributie
 
                 print('Lr: {:.8f}'.format(cur_lr))
                 logging.info('Lr: {:.8f}'.format(cur_lr))
@@ -227,6 +234,10 @@ if __name__ == '__main__':
     # torch.manual_seed(seed)
     # torch.cuda.manual_seed_all(seed)
 
+    #contributie
+    # bn_out drives the LayerNorm shape inside NS_Block.
+    # With size=(224,448): bn_out=(14,28) = spatial size of high_feature after High_RFB.
+    # (224/16=14, 448/16=28 — features are at 1/16 scale after up_sample_high stride=2)
     model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan = config.use_kan).cuda()
     model = nn.DataParallel(model)
 
@@ -237,20 +248,45 @@ if __name__ == '__main__':
         ema.load(model, config.checkpoint_path)
     use_ema = config.ema_train
 
+    # Load Swin-B pretrained weights before any checkpoint restore
+    if config.swin_pretrained != '':
+        model.module.feature_extractor.load_pretrained(config.swin_pretrained)
+    #contributie
+
+    #contributie
+    # Separate backbone (Swin) and head parameters for differential learning rates.
+    # Swin parameters that should have zero weight decay are handled by the
+    # no_weight_decay() / no_weight_decay_keywords() methods on SwinBackbone;
+    # here we use a single group per component to keep the optimizer simple.
     backbone_params = []
+    backbone_no_wd_params = []
     head_params = []
+    no_wd_names = model.module.feature_extractor.no_weight_decay()
+    no_wd_keywords = model.module.feature_extractor.no_weight_decay_keywords()
     for name, param in model.named_parameters():
         if name.startswith("module.feature_extractor"):
-            backbone_params.append(param)
+            bare_name = name[len("module.feature_extractor."):]
+            is_no_wd = (bare_name in no_wd_names or
+                        any(kw in bare_name for kw in no_wd_keywords))
+            if is_no_wd:
+                backbone_no_wd_params.append(param)
+            else:
+                backbone_params.append(param)
         else:
             head_params.append(param)
+    #contributie
 
-    print('Nr. backbone params: {:03d}'.format(len(backbone_params)))
-    print('Nr. head params: {:03d}'.format(len(head_params)))
+    #contributie
+    print('Nr. backbone params (with wd)   : {:05d}'.format(len(backbone_params)))
+    print('Nr. backbone params (no wd)     : {:05d}'.format(len(backbone_no_wd_params)))
+    print('Nr. head params                 : {:05d}'.format(len(head_params)))
 
     optimizer = torch.optim.AdamW([
-        {'params': backbone_params, 'lr': config.backbone_lr, 'weight_decay': config.backbone_weight_decay, 'name': 'backbone_params'},
-        {'params': head_params, 'lr': config.head_lr, 'weight_decay': config.head_weight_decay, 'name': 'head_params'}])
+        {'params': backbone_params,       'lr': config.backbone_lr, 'weight_decay': config.backbone_weight_decay, 'name': 'backbone_params'},
+        {'params': backbone_no_wd_params, 'lr': config.backbone_lr, 'weight_decay': 0.0,                         'name': 'backbone_no_wd'},
+        {'params': head_params,           'lr': config.head_lr,     'weight_decay': config.head_weight_decay,     'name': 'head_params'},
+    ])
+    #contributie
     
     save_path = config.save_path
     if not os.path.exists(save_path):

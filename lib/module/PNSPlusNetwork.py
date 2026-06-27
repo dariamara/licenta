@@ -5,10 +5,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from lib.module.LightRFB import LightRFB
-from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
 from lib.module.PNSPlusModule import NS_Block
-# from lib.module.ConvNeXt import convnext_tiny, convnext_base, convnext_small
 from lib.module.KAN import KANBlock, PatchEmbed
+#contributie
+from lib.module.SwinTransformer import SwinBackbone
+#contributie
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -56,7 +57,17 @@ class DilatedParallelConvBlockD2(nn.Module):
 class PNSNet(nn.Module):
     def __init__(self, bn_out, use_kan):
         super(PNSNet, self).__init__()
-        # self.feature_extractor = convnext_base(pretrained=True, in_22k=True,  num_classes=21841, drop_path_rate=0.2)
+        #contributie
+        # Swin-B backbone: outputs low_feature (512ch, 1/16) and high_feature (1024ch, 1/32)
+        self.feature_extractor = SwinBackbone(
+            img_size=(224, 448),
+            embed_dim=128,
+            depths=(2, 2, 18, 2),
+            num_heads=(4, 8, 16, 32),
+            window_size=7,
+            drop_path_rate=0.2,
+        )
+        #contributie
         self.High_RFB = LightRFB(channels_in=1024)
         self.Low_RFB = LightRFB(channels_in=512, channels_mid=128, channels_out=24)
 
@@ -69,20 +80,24 @@ class PNSNet(nn.Module):
         self.NSB_global = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[3, 4, 3, 4])
         self.NSB_local = NS_Block(bn_out=bn_out, channels_in=32, radius=[3, 3, 3, 3], dilation=[1, 2, 1, 2])
         self.up_sample_low = nn.ConvTranspose2d(512, 512, kernel_size=2, stride=2)
-        self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
+        #contributie
+        # Swin high_feature is at 1/32 scale; stride=2 brings it to 1/16 matching low_feature.
+        # The previous stride=4 was for the old backbone which further downsampled via KAN patch_embed.
+        self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=2, stride=2)
+        #contributie
 
-        self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
-        
-        self.block_h_1 = nn.ModuleList([KANBlock(
-            dim=1024
-            )])
+        #contributie
+        # KAN block 1: applied directly to Swin high_feature tokens (no extra patch_embed
+        # downsampling needed because Swin already provides 1/32-scale tokens).
+        self.block_h_1 = nn.ModuleList([KANBlock(dim=1024)])
+        #contributie
 
         self.block_h_2 = nn.ModuleList([KANBlock(
             dim=32
             )])
-        
+
         self.norm_h_1 = nn.LayerNorm(1024)
-        
+
         self.norm_h_2 = nn.LayerNorm(32)
 
         self.use_kan = use_kan
@@ -94,28 +109,25 @@ class PNSNet(nn.Module):
 
         B = x.shape[0]
 
-        #print(x)
-        #print(x.shape)
-        # x = self.feature_extractor.downsample_layers[0](x)
-        # x = self.feature_extractor.stages[0](x)
-        #
-        # x = self.feature_extractor.downsample_layers[1](x)
-        # x = self.feature_extractor.stages[1](x)
-        #
-        # # Extract anchor, low-level, and high-level features.
-        # low_feature = self.feature_extractor.downsample_layers[2](x)
-        # low_feature = self.feature_extractor.stages[2](low_feature)
-        #
-        # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
-        #
-        # high_feature = self.feature_extractor.stages[3](high_feature)
+        #contributie
+        # Extract multi-scale features with Swin-B backbone.
+        # low_feature:  (B, 512,  H/16, W/16) — e.g. (B, 512, 14, 28) for 224x448 input
+        # high_feature: (B, 1024, H/32, W/32) — e.g. (B, 1024, 7, 14) for 224x448 input
+        low_feature, high_feature = self.feature_extractor(x)
+        #contributie
 
+        #contributie
         if self.use_kan:
-            high_feature, H, W = self.patch_embed_h_1(high_feature)
-            for i, blk in enumerate(self.block_h_1):
-                high_feature = blk(high_feature, H, W)
-            high_feature = self.norm_h_1(high_feature)
-            high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
+            # Flatten Swin tokens and apply KAN directly — no extra patch_embed step
+            # because the Swin features are already at a compact 1/32 spatial scale.
+            B_k, C_k, H_k, W_k = high_feature.shape   # (B, 1024, 7, 14)
+            high_feature_tokens = high_feature.flatten(2).transpose(1, 2)  # (B, H*W, 1024)
+            for blk in self.block_h_1:
+                high_feature_tokens = blk(high_feature_tokens, H_k, W_k)
+            high_feature_tokens = self.norm_h_1(high_feature_tokens)
+            high_feature = high_feature_tokens.reshape(B_k, H_k, W_k, -1).permute(0, 3, 1, 2).contiguous()
+            # (B, 1024, 7, 14) — spatial shape unchanged
+        #contributie
 
         high_feature = self.up_sample_high(high_feature)
 
@@ -188,7 +200,10 @@ class PNSNet(nn.Module):
         return out
 
 
+#contributie
 if __name__ == "__main__":
-    a = torch.randn(1, 6, 3, 256, 448).cuda()
-    mobile = PNSNet().cuda()
+    # 1 batch, 7 clips (anchor + 6 local), 3 channels, 224x448 (Swin-compatible size)
+    a = torch.randn(1, 7, 3, 224, 448).cuda()
+    mobile = PNSNet(bn_out=(14, 28), use_kan=False).cuda()
     print(mobile(a).shape)
+#contributie

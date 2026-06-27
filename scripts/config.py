@@ -24,8 +24,14 @@ parser.add_argument('--train_split', type=str,
                     default="TrainDataset")
 parser.add_argument('--dataset_root', type=str,
                     default="/storage/datasets/SUN/data")
+#contributie
+# Changed from (256, 448) to (224, 448): Swin window_size=7 requires the patch
+# grid dimensions to be divisible by 7. With height=224 the patch grid is [56,112]
+# and all 4 stage resolutions ([56,112],[28,56],[14,28],[7,14]) divide evenly by 7.
+# With height=256 the grid is [64,112] where 64 % 7 != 0, causing a runtime crash.
 parser.add_argument('--size', type=tuple,
-                    default=(256, 448))
+                    default=(224, 448))
+#contributie
 parser.add_argument('--batchsize', type=int, default=24)
 parser.add_argument('--video_time_clips', type=int, default=6)
 
@@ -48,5 +54,11 @@ parser.add_argument('--ema_train', action='store_true', help='Enable EMA for tra
 parser.add_argument('--save_path_preds', type=str, default="/storage/datasets/preds")
 
 parser.add_argument('--use_kan', action='store_true', help='Use KAN blocks')
+
+#contributie
+parser.add_argument('--swin_pretrained', type=str, default='',
+                    help='Path to Swin-B ImageNet-22k pretrained checkpoint '
+                         '(swin_base_patch4_window7_224_22k.pth)')
+#contributie
 
 config = parser.parse_args()
