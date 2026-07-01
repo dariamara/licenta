@@ -3,28 +3,77 @@
 <head>
     <title>Image Processor</title>
     <style>
-        .container { display: flex; gap: 20px; margin-top: 20px; }
-        img { max-width: 400px; border: 1px solid #ddd; }
+        .player { margin-top: 20px; }
+        .player img { max-width: 500px; border: 1px solid #ddd; display: block; }
+        .controls { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
     </style>
 </head>
 <body>
-    <h1>Upload and Process Image</h1>
+    <p><a href="/">&larr; Choose a different model</a></p>
+    <h1>Upload a Folder of Images</h1>
+    <p>Using model: <strong>{{ model_label }}</strong></p>
     <form action="/upload/" method="post" enctype="multipart/form-data">
-        <input type="file" name="file" accept="image/*">
+        <input type="hidden" name="model" value="{{ model }}">
+        <input type="file" name="files" webkitdirectory directory multiple>
         <button type="submit">Upload & Process</button>
     </form>
 
-    {% if original %}
-    <div class="container">
-        <div>
-            <h3>Original</h3>
-            <img src="/{{ original }}" alt="Original">
-        </div>
-        <div>
-            <h3>Processed</h3>
-            <img src="/{{ processed }}" alt="Processed">
+    {% if frames %}
+    <div class="player">
+        <h3>Processed ({{ frames|length }} frames)</h3>
+        <img id="frame-view" src="/{{ frames[0] }}" alt="Processed frame">
+        <div class="controls">
+            <button id="play-pause">Pause</button>
+            <input id="scrubber" type="range" min="0" max="{{ frames|length - 1 }}" value="0" style="flex: 1;">
+            <span id="frame-count">1 / {{ frames|length }}</span>
         </div>
     </div>
+
+    <script>
+        const frames = {{ frames|tojson }};
+        const fps = 10;
+        const img = document.getElementById("frame-view");
+        const playPauseBtn = document.getElementById("play-pause");
+        const scrubber = document.getElementById("scrubber");
+        const frameCount = document.getElementById("frame-count");
+
+        let current = 0;
+        let playing = true;
+        let intervalId = null;
+
+        function showFrame(i) {
+            current = i;
+            img.src = "/" + frames[current];
+            scrubber.value = current;
+            frameCount.textContent = (current + 1) + " / " + frames.length;
+        }
+
+        function tick() {
+            showFrame((current + 1) % frames.length);
+        }
+
+        function play() {
+            playing = true;
+            playPauseBtn.textContent = "Pause";
+            intervalId = setInterval(tick, 1000 / fps);
+        }
+
+        function pause() {
+            playing = false;
+            playPauseBtn.textContent = "Play";
+            clearInterval(intervalId);
+        }
+
+        playPauseBtn.addEventListener("click", () => playing ? pause() : play());
+        scrubber.addEventListener("input", (e) => {
+            pause();
+            showFrame(parseInt(e.target.value, 10));
+        });
+
+        if (frames.length > 1) {
+            play();
+        }
+    </script>
     {% endif %}
 </body>
 </html>

@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Image Processor</title>
+    <style>
+        body { font-family: sans-serif; }
+        .models { display: flex; gap: 12px; margin-top: 20px; }
+        .models a button { padding: 12px 20px; font-size: 16px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Choose a Model</h1>
+    <div class="models">
+        {% for key, label in models.items() %}
+        <a href="/app?model={{ key }}"><button>{{ label }}</button></a>
+        {% endfor %}
+    </div>
+</body>
+</html>
