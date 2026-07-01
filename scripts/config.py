@@ -39,11 +39,11 @@ parser.add_argument('--augment', action='store_true', help='Enable augmentation'
 
 parser.add_argument('--checkpoint_path', type=str, default='', help='Load training state')
 
-parser.add_argument('--pth_path', type=str, default='/tmp/work/epoch_2/PNSPlus.pth')
+parser.add_argument('--pth_path', type=str, default='/tmp/work/epoch_15/PNSPlus.pth')
 
-parser.add_argument('--test_split', type=str, default="TestEasyDataset/Unseen")
+parser.add_argument('--test_split', type=str, default="TestHardDataset/Unseen")
 
-parser.add_argument('--val_split', type=str, default="TestEasyDataset/Seen")
+parser.add_argument('--val_split', type=str, default="TestHardDataset/Seen")
 
 parser.add_argument('--ema_test', action='store_true', help='Enable EMA for test')
 

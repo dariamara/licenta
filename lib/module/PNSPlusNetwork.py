@@ -121,11 +121,8 @@ class PNSNet(nn.Module):
         # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
         # high_feature = self.feature_extractor.stages[3](high_feature)
 
-        # in PNSNet.forward()
         # contributie start
         x = self.feature_extractor.stem(x)
-        # Use iterative_checkpoint (passes dummy_tensor) so checkpointing works
-        # even when x does not yet require grad at the first encoder stage.
         x = self.feature_extractor.iterative_checkpoint(self.feature_extractor.enc_block_0, x)
         x = self.feature_extractor.down_0(x)
 
@@ -200,7 +197,7 @@ class PNSNet(nn.Module):
 
             #daria
             #la train am primit warning ca val default a lui align_corners s-a schimbat din false in true => l-am pus false explicit
-            high_feature = nn.Mish()(F.interpolate(high_feature, size=(high_feature_H, high_feature_W), mode='bilinear', align_corners=False))
+            high_feature = nn.Mish()(F.interpolate(high_feature.float(), size=(high_feature_H, high_feature_W), mode='bilinear', align_corners=False)).to(high_feature.dtype)
             #end daria
 
         to_slice = t_h.shape[0] - high_feature.shape[0]
@@ -208,7 +205,7 @@ class PNSNet(nn.Module):
         high_feature = high_feature + t_h[to_slice:]
 
         # Resize high-level feature to the same as low-level feature.
-        high_feature = F.interpolate(high_feature, size=(low_feature.shape[-2], low_feature.shape[-1]),
+        high_feature = F.interpolate(high_feature.float(), size=(low_feature.shape[-2], low_feature.shape[-1]),
                                      mode="bilinear",
                                      align_corners=False)
 
@@ -216,7 +213,7 @@ class PNSNet(nn.Module):
         out = self.decoder(low_feature.clone(), high_feature.clone())
 
         out = torch.sigmoid(
-            F.interpolate(self.SegNIN(out), size=(origin_shape[-2], origin_shape[-1]), mode="bilinear",
+            F.interpolate(self.SegNIN(out).float(), size=(origin_shape[-2], origin_shape[-1]), mode="bilinear",
                           align_corners=False))
 
         #contributie

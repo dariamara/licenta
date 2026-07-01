@@ -86,7 +86,7 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             # loss.backward()
 
             # contributie start
-            with autocast():
+            with autocast(dtype=torch.bfloat16):
                 preds = model(images)
                 loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
 

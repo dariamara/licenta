@@ -13,7 +13,8 @@ nvcc_args = [
     '-gencode', 'arch=compute_70,code=sm_70',
     '-gencode', 'arch=compute_75,code=sm_75',
     '-gencode', 'arch=compute_80,code=sm_80',
-    '-gencode', 'arch=compute_80,code=compute_80'
+    '-gencode', 'arch=compute_89,code=sm_89',
+    '-gencode', 'arch=compute_89,code=compute_89'
 ]
 cxx_args = ['-std=c++17']
 
