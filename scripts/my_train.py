@@ -86,7 +86,7 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             # loss.backward()
 
             # contributie start
-            with autocast():
+            with autocast(dtype=torch.bfloat16):
                 preds = model(images)
                 loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
 
@@ -250,9 +250,7 @@ if __name__ == '__main__':
     # torch.cuda.manual_seed_all(seed)
 
     # model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan = config.use_kan).cuda()
-    model = Network(bn_out=(config.size[0] // 8, config.size[1] // 8), use_kan=config.use_kan,
-                    no_kan=config.no_kan, kan_depths=config.kan_depths,
-                    drop_path_rate=config.drop_path_rate).cuda()
+    model = Network(bn_out=(config.size[0] // 8, config.size[1] // 8), use_kan=config.use_kan).cuda()
     model = nn.DataParallel(model)
 
     cudnn.benchmark = True
@@ -345,4 +343,3 @@ if __name__ == '__main__':
     for epoch in range(start_epoch, config.epoches):
         train(train_loader, model, optimizer, epoch, save_path, loss_func)
         val(val_loader, model, epoch, loss_func_val)
-

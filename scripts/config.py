@@ -6,10 +6,10 @@ parser = argparse.ArgumentParser()
 # optimizer
 parser.add_argument('--gpu_id', type=str, default='0, 1', help='train use gpu')
 parser.add_argument('--lr_mode', type=str, default="poly")
-#original 
-#parser.add_argument('--backbone_lr', type=float, default=3e-5)
 # contributie start
-parser.add_argument('--backbone_lr', type=float, default=2e-4)
+# MedNeXt trains from scratch (no pretrained weights), so backbone needs a higher LR than ConvNeXt's 3e-5.
+# Reduced from 2e-4 to 1e-4: fp16 activations in the 1024-channel bottleneck overflow with too high an LR.
+parser.add_argument('--backbone_lr', type=float, default=1e-4)
 # contributie end
 parser.add_argument('--head_lr', type=float, default=1e-3)
 parser.add_argument('--backbone_weight_decay', type=float, default=1e-8)
@@ -52,14 +52,5 @@ parser.add_argument('--ema_train', action='store_true', help='Enable EMA for tra
 parser.add_argument('--save_path_preds', type=str, default="/storage/datasets/preds")
 
 parser.add_argument('--use_kan', action='store_true', help='Use KAN blocks')
-
-parser.add_argument('--no_kan', action='store_true',
-                    help='Ablation: replace KANLinear with nn.Linear inside the tokenized blocks')
-
-parser.add_argument('--kan_depths', type=int, nargs=2, default=[1, 1],
-                    help='Number of U-KAN tokenized blocks in each of the two KAN stages')
-
-parser.add_argument('--drop_path_rate', type=float, default=0.0,
-                    help='Stochastic depth rate across the U-KAN blocks')
 
 config = parser.parse_args()

@@ -59,7 +59,7 @@ class DilatedParallelConvBlockD2(nn.Module):
 
 
 class PNSNet(nn.Module):
-    def __init__(self, bn_out, use_kan, no_kan=False, kan_depths=(1, 1), drop_path_rate=0.0):
+    def __init__(self, bn_out, use_kan):
         super(PNSNet, self).__init__()
         # contributie start
         self.feature_extractor = create_mednext_encoder(
@@ -83,22 +83,17 @@ class PNSNet(nn.Module):
         self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
 
         self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
-
-        # Stochastic-depth schedule shared across both tokenized U-KAN stages,
-        # mirroring the `dpr` schedule used in the original U-KAN archs.py.
-        depths = list(kan_depths)
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
-
+        
         self.block_h_1 = nn.ModuleList([KANBlock(
-            dim=1024, drop_path=dpr[i], no_kan=no_kan
-            ) for i in range(depths[0])])
+            dim=1024
+            )])
 
         self.block_h_2 = nn.ModuleList([KANBlock(
-            dim=32, drop_path=dpr[depths[0] + i], no_kan=no_kan
-            ) for i in range(depths[1])])
-
+            dim=32
+            )])
+        
         self.norm_h_1 = nn.LayerNorm(1024)
-
+        
         self.norm_h_2 = nn.LayerNorm(32)
 
         self.use_kan = use_kan
@@ -126,11 +121,8 @@ class PNSNet(nn.Module):
         # high_feature = self.feature_extractor.downsample_layers[3](low_feature)
         # high_feature = self.feature_extractor.stages[3](high_feature)
 
-        # in PNSNet.forward()
         # contributie start
         x = self.feature_extractor.stem(x)
-        # original
-        # x = self.feature_extractor.enc_block_0(x)
         x = self.feature_extractor.iterative_checkpoint(self.feature_extractor.enc_block_0, x)
         x = self.feature_extractor.down_0(x)
 
@@ -223,6 +215,12 @@ class PNSNet(nn.Module):
         out = torch.sigmoid(
             F.interpolate(self.SegNIN(out), size=(origin_shape[-2], origin_shape[-1]), mode="bilinear",
                           align_corners=False))
+
+        #contributie
+        # nan_to_num must come before clamp: clamp(NaN) = NaN in PyTorch, so NaN would still reach BCE
+        out = torch.nan_to_num(out, nan=0.5, posinf=1.0, neginf=0.0)
+        out = out.clamp(min=1e-7, max=1 - 1e-7)
+        #contributie
 
         return out
 
