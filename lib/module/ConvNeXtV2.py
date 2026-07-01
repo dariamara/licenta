@@ -169,7 +169,8 @@ def convnextv2_base(pretrained=False, in_22k=False, **kwargs):
     if pretrained:
         url = model_urls_v2['convnextv2_base_22k'] if in_22k else model_urls_v2['convnextv2_base_1k']
         checkpoint = torch.hub.load_state_dict_from_url(url=url, map_location="cpu")
-        model.load_state_dict(checkpoint["model"])
+        state_dict = {k: v for k, v in checkpoint["model"].items() if not k.startswith("head.")}
+        model.load_state_dict(state_dict, strict=False)
     return model
 
 def convnextv2_large(**kwargs):

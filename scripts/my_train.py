@@ -9,6 +9,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils import data
+from torch.cuda.amp import autocast, GradScaler
 
 from config import config
 from lib.dataloader.dataloader import get_video_dataset
@@ -34,7 +35,8 @@ class MixedLoss(nn.Module):
         pred, target = tuple(inputs)
         pred = pred.squeeze()
         target = target.squeeze()
-        cross_entropy_loss = F.binary_cross_entropy(pred, target.float())
+        with autocast(enabled=False):
+            cross_entropy_loss = F.binary_cross_entropy(pred.float(), target.float())
         eps = 1e-14
         preds = pred > 0.5
         intersection = (preds * target).sum()
@@ -73,10 +75,11 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             images = images.cuda()
             gts = gts.cuda()
             
-            preds = model(images)
-            
-            loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
-            loss.backward()
+            with autocast():
+                preds = model(images)
+                loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
+
+            scaler.scale(loss).backward()
 
             eval_preds = preds.contiguous().view(*(gts.shape))
 
@@ -87,6 +90,7 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
                     size += 1
 
             #clip_gradient(optimizer, config.clip)
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.clip)
 
             # backbone_norm = 0
@@ -106,7 +110,8 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             # backbone_grad_norms.append(backbone_norm)
             # head_grad_norms.append(head_norm)
 
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             step += 1
             epoch_step += 1
@@ -281,6 +286,8 @@ if __name__ == '__main__':
 
     schedule_backbone = cosine_scheduler(config.backbone_lr, min_lr_backbone, 2, config.epoches, total_step)
     schedule_head = cosine_scheduler(config.head_lr, min_lr_head , 4, config.epoches, total_step)
+
+    scaler = GradScaler()
 
     val_loader = get_video_dataset(config.val_split)
     val_loader = data.DataLoader(dataset=val_loader,

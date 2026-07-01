@@ -29,7 +29,7 @@ parser.add_argument('--size', type=tuple,
 parser.add_argument('--batchsize', type=int, default=24)
 parser.add_argument('--video_time_clips', type=int, default=6)
 
-parser.add_argument('--save_path', type=str, default='/tmp/work/')
+parser.add_argument('--save_path', type=str, default='/tmp/work_ConvNeXt_KAN/')
 
 parser.add_argument('--augment', action='store_true', help='Enable augmentation')
 

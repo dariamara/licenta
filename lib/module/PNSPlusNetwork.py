@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from lib.module.LightRFB import LightRFB
 from lib.module.Res2Net_v1b import res2net50_v1b_26w_4s
@@ -118,23 +119,23 @@ class PNSNet(nn.Module):
 
         #contributie
         x = self.feature_extractor.downsample_layers[0](x)
-        x = self.feature_extractor.stages[0](x)
+        x = checkpoint(self.feature_extractor.stages[0], x)
 
         x = self.feature_extractor.downsample_layers[1](x)
-        x = self.feature_extractor.stages[1](x)
+        x = checkpoint(self.feature_extractor.stages[1], x)
 
         # Extract anchor, low-level, and high-level features.
         low_feature = self.feature_extractor.downsample_layers[2](x)
-        low_feature = self.feature_extractor.stages[2](low_feature)
+        low_feature = checkpoint(self.feature_extractor.stages[2], low_feature)
 
         high_feature = self.feature_extractor.downsample_layers[3](low_feature)
-        high_feature = self.feature_extractor.stages[3](high_feature)
+        high_feature = checkpoint(self.feature_extractor.stages[3], high_feature)
         #contributie
 
         if self.use_kan:
             high_feature, H, W = self.patch_embed_h_1(high_feature)
             for i, blk in enumerate(self.block_h_1):
-                high_feature = blk(high_feature, H, W)
+                high_feature = checkpoint(blk, high_feature, H, W)
             high_feature = self.norm_h_1(high_feature)
             high_feature = high_feature.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
 

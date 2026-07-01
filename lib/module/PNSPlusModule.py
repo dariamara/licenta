@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 from torch.autograd.function import once_differentiable
+from torch.cuda.amp import custom_fwd, custom_bwd
 
 import self_cuda_backend as _ext
 
@@ -17,6 +18,7 @@ def _check_contiguous(*args):
 
 class Relevance_Measuring(autograd.Function):
     @staticmethod
+    @custom_fwd(cast_inputs=torch.float32)
     def forward(ctx, query, key, radius=1, dilation=1):
         ctx.radius = radius
         ctx.dilation = dilation
@@ -33,6 +35,7 @@ class Relevance_Measuring(autograd.Function):
 
     @staticmethod
     @once_differentiable
+    @custom_bwd
     def backward(ctx, dw):
         query, key = ctx.saved_tensors
         dquery = torch.zeros_like(query)
@@ -44,6 +47,7 @@ class Relevance_Measuring(autograd.Function):
 
 class Spatial_Temporal_Aggregation(autograd.Function):
     @staticmethod
+    @custom_fwd(cast_inputs=torch.float32)
     def forward(ctx, weight, proj, radius=1, dilation=1):
         ctx.radius = radius
         ctx.dilation = dilation
@@ -55,6 +59,7 @@ class Spatial_Temporal_Aggregation(autograd.Function):
 
     @staticmethod
     @once_differentiable
+    @custom_bwd
     def backward(ctx, dout):
         weight, proj = ctx.saved_tensors
         dweight = torch.zeros_like(weight)
