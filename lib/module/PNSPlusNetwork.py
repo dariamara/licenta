@@ -14,6 +14,12 @@ from lib.module.PNSPlusModule import NS_Block
 from lib.module.MedNeXt import create_mednext_encoder
 from lib.module.KAN import KANBlock, PatchEmbed
 
+# contributie start
+# Shared across DataParallel replicas since it's a module-level global, not an
+# instance attribute (which would get reset on every replicate() call).
+NAN_STATS = {'frames': 0, 'pixels': 0}
+# contributie end
+
 
 class conbine_feature(nn.Module):
     def __init__(self):
@@ -218,6 +224,10 @@ class PNSNet(nn.Module):
 
         #contributie
         # nan_to_num must come before clamp: clamp(NaN) = NaN in PyTorch, so NaN would still reach BCE
+        nan_mask = torch.isnan(out)
+        if nan_mask.any():
+            NAN_STATS['frames'] += 1
+            NAN_STATS['pixels'] += nan_mask.sum().item()
         out = torch.nan_to_num(out, nan=0.5, posinf=1.0, neginf=0.0)
         out = out.clamp(min=1e-7, max=1 - 1e-7)
         #contributie

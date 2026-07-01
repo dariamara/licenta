@@ -15,6 +15,7 @@ from lib.module.PNSPlusNetwork import PNSNet as Network
 from lib.dataloader.preprocess import *
 from lib.dataloader.dataloader import get_video_dataset
 from lib.module.EMA import EMA
+from lib.module.PNSPlusNetwork import NAN_STATS
 import torch.nn as nn
 
 import logging
@@ -134,3 +135,5 @@ if __name__ == '__main__':
     meandice = dice_sum / size
     print('Mean Dice on frames:{:.4f}'.format(meandice))
     logging.info('Mean Dice on frames:{:.4f}'.format(meandice))
+    print('NaN frames: {}/{}, NaN pixels: {}'.format(NAN_STATS['frames'], batches, NAN_STATS['pixels']))
+    logging.info('NaN frames: {}/{}, NaN pixels: {}'.format(NAN_STATS['frames'], batches, NAN_STATS['pixels']))
