@@ -59,7 +59,7 @@ class DilatedParallelConvBlockD2(nn.Module):
 
 
 class PNSNet(nn.Module):
-    def __init__(self, bn_out, use_kan):
+    def __init__(self, bn_out, use_kan, no_kan=False, kan_depths=(1, 1), drop_path_rate=0.0):
         super(PNSNet, self).__init__()
         # contributie start
         self.feature_extractor = create_mednext_encoder(
@@ -83,15 +83,18 @@ class PNSNet(nn.Module):
         self.up_sample_high = nn.ConvTranspose2d(1024, 1024, kernel_size=4 if use_kan else 2, stride=4 if use_kan else 2)
 
         self.patch_embed_h_1 = PatchEmbed(img_size=256 // 8, patch_size=3, stride=2, in_chans=1024, embed_dim=1024)
-        
+
+        total_kan_blocks = kan_depths[0] + kan_depths[1]
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, total_kan_blocks)]
+
         self.block_h_1 = nn.ModuleList([KANBlock(
-            dim=1024
-            )])
+            dim=1024, drop_path=dpr[i], no_kan=no_kan
+            ) for i in range(kan_depths[0])])
 
         self.block_h_2 = nn.ModuleList([KANBlock(
-            dim=32
-            )])
-        
+            dim=32, drop_path=dpr[kan_depths[0] + i], no_kan=no_kan
+            ) for i in range(kan_depths[1])])
+
         self.norm_h_1 = nn.LayerNorm(1024)
         
         self.norm_h_2 = nn.LayerNorm(32)

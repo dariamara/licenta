@@ -39,11 +39,11 @@ parser.add_argument('--augment', action='store_true', help='Enable augmentation'
 
 parser.add_argument('--checkpoint_path', type=str, default='', help='Load training state')
 
-parser.add_argument('--pth_path', type=str, default='/tmp/work/epoch_2/PNSPlus.pth')
+parser.add_argument('--pth_path', type=str, default='/tmp/work/epoch_15/PNSPlus.pth')
 
-parser.add_argument('--test_split', type=str, default="TestEasyDataset/Unseen")
+parser.add_argument('--test_split', type=str, default="TestHardDataset/Unseen")
 
-parser.add_argument('--val_split', type=str, default="TestEasyDataset/Seen")
+parser.add_argument('--val_split', type=str, default="TestHardDataset/Seen")
 
 parser.add_argument('--ema_test', action='store_true', help='Enable EMA for test')
 
@@ -52,5 +52,8 @@ parser.add_argument('--ema_train', action='store_true', help='Enable EMA for tra
 parser.add_argument('--save_path_preds', type=str, default="/storage/datasets/preds")
 
 parser.add_argument('--use_kan', action='store_true', help='Use KAN blocks')
+parser.add_argument('--no_kan', action='store_true', help='Ablation: swap KAN spline layers for plain linear layers')
+parser.add_argument('--kan_depths', type=int, nargs=2, default=(1, 1), help='Number of KAN blocks per stage')
+parser.add_argument('--drop_path_rate', type=float, default=0.0, help='Stochastic depth rate across KAN blocks')
 
 config = parser.parse_args()
