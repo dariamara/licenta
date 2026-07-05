@@ -35,7 +35,7 @@ parser.add_argument('--augment', action='store_true', help='Enable augmentation'
 
 parser.add_argument('--checkpoint_path', type=str, default='', help='Load training state')
 
-parser.add_argument('--pth_path', type=str, default='/tmp/work/epoch_1/PNSPlus.pth')
+parser.add_argument('--pth_path', type=str, default='/tmp/work_ConvNeXt_KAN/epoch_15/PNSPlus.pth')
 
 parser.add_argument('--test_split', type=str, default="TestEasyDataset/Unseen")
 
