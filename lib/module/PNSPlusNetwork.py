@@ -10,6 +10,13 @@ from lib.module.ConvNeXtV2 import convnextv2_base
 #contributie
 
 
+def interpolate_fp32(x, **kwargs):
+    # bilinear upsample has no BFloat16 CUDA kernel on this torch build; run it in fp32.
+    # Conv layers right after will auto-cast back down under the outer autocast context.
+    with torch.cuda.amp.autocast(enabled=False):
+        return F.interpolate(x.float(), **kwargs)
+
+
 #contributie
 class PNSNet(nn.Module):
     def __init__(self, bn_out=(32, 56)):
@@ -96,7 +103,7 @@ class PNSNet(nn.Module):
         out = out.reshape(B, H5, W5, -1).permute(0, 3, 1, 2).contiguous()  # (B*7, 1024, H5, W5)
 
         # U-KAN decoder stage 4: upsample bottleneck + skip t4 + KAN
-        out = F.relu(F.interpolate(self.decoder1(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = F.relu(interpolate_fp32(self.decoder1(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
         out = torch.add(out, t4)
         _, _, H4, W4 = out.shape
         out = out.flatten(2).transpose(1, 2)
@@ -106,7 +113,7 @@ class PNSNet(nn.Module):
         out = out.reshape(B, H4, W4, -1).permute(0, 3, 1, 2).contiguous()  # (B*7, 768, H4, W4)
 
         # U-KAN decoder stage 3: upsample + skip low_feature (t3) + KAN
-        out = F.relu(F.interpolate(self.decoder2(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = F.relu(interpolate_fp32(self.decoder2(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
         out = torch.add(out, low_feature)
         _, _, H3, W3 = out.shape
         out = out.flatten(2).transpose(1, 2)
@@ -116,7 +123,7 @@ class PNSNet(nn.Module):
         out = out.reshape(B, H3, W3, -1).permute(0, 3, 1, 2).contiguous()  # (B*7, 512, H3, W3)
 
         # Decoder stage 2: upsample to temporal-processing resolution (H/8, W/8)
-        out = F.relu(F.interpolate(self.decoder3(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = F.relu(interpolate_fp32(self.decoder3(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
         # (B*7, 32, H/8, W/8)
 
         t_h = out  # skip for temporal residual connection
@@ -139,11 +146,11 @@ class PNSNet(nn.Module):
         out = out + t_h[to_slice:].to(out.dtype)
 
         # Final decoder stages
-        out = F.relu(F.interpolate(self.decoder4(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
-        out = F.relu(F.interpolate(self.decoder5(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = F.relu(interpolate_fp32(self.decoder4(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
+        out = F.relu(interpolate_fp32(self.decoder5(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))
 
         out = torch.sigmoid(
-            F.interpolate(self.SegNIN(out), size=(origin_shape[-2], origin_shape[-1]),
+            interpolate_fp32(self.SegNIN(out), size=(origin_shape[-2], origin_shape[-1]),
                           mode='bilinear', align_corners=False)
         )
         return out

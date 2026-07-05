@@ -12,6 +12,15 @@ from torch.utils import data
 
 from torch.cuda.amp import autocast, GradScaler
 
+def bf16_autocast():
+    # bf16 avoids the fp16 overflow -> NaN failures that trip the BCE [0,1] assertion.
+    # Older torch builds (no `dtype=` kwarg on autocast) fall back to full fp32 instead
+    # of fp16, since fp16 is what caused the NaNs in the first place.
+    try:
+        return autocast(dtype=torch.bfloat16)
+    except TypeError:
+        return autocast(enabled=False)
+
 from config import config
 from lib.dataloader.dataloader import get_video_dataset
 from lib.module.EMA import EMA
@@ -36,7 +45,8 @@ class MixedLoss(nn.Module):
         pred, target = tuple(inputs)
         pred = pred.squeeze()
         target = target.squeeze()
-        cross_entropy_loss = F.binary_cross_entropy(pred, target.float())
+        with autocast(enabled=False):
+            cross_entropy_loss = F.binary_cross_entropy(pred.float(), target.float())
         eps = 1e-14
         preds = pred > 0.5
         intersection = (preds * target).sum()
@@ -75,12 +85,11 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             images = images.cuda()
             gts = gts.cuda()
 
-            with autocast():
+            with bf16_autocast():
                 preds = model(images)
+                loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
 
-            # loss in fp32 outside autocast: F.binary_cross_entropy is unsafe under fp16 autocast
             preds = preds.float()
-            loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
             scaler.scale(loss).backward()
 
             eval_preds = preds.contiguous().view(*(gts.shape))
@@ -194,7 +203,7 @@ def val(val_loader, model, epoch, loss_func):
             images = images.cuda()
             gts = gts.cuda()
 
-            with autocast():
+            with bf16_autocast():
                 preds = model(images)
             preds = preds.float()
 
