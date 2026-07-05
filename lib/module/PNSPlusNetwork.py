@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from lib.module.PNSPlusModule import NS_Block
 #contributie
@@ -56,6 +57,15 @@ class PNSNet(nn.Module):
 
         self.SegNIN = nn.Sequential(nn.Dropout2d(0.1), nn.Conv2d(16, 1, kernel_size=1, bias=False))
 
+        # trade compute for memory on the heavy ConvNeXtV2 stages
+        self.use_checkpoint = True
+
+    def _run_stage(self, stage, x):
+        # gradient checkpointing: recompute activations in backward instead of storing them
+        if self.use_checkpoint and self.training:
+            return checkpoint(stage, x)
+        return stage(x)
+
     def forward(self, x):
         origin_shape = x.shape                       # (B, 7, 3, H, W)
         x = x.view(-1, *origin_shape[2:])            # (B*7, 3, H, W)
@@ -63,13 +73,13 @@ class PNSNet(nn.Module):
 
         # ConvNeXtV2 backbone: extract multi-scale features
         x = self.feature_extractor.downsample_layers[0](x)
-        x = self.feature_extractor.stages[0](x)
+        x = self._run_stage(self.feature_extractor.stages[0], x)
         x = self.feature_extractor.downsample_layers[1](x)
-        x = self.feature_extractor.stages[1](x)
+        x = self._run_stage(self.feature_extractor.stages[1], x)
         low_feature = self.feature_extractor.downsample_layers[2](x)
-        low_feature = self.feature_extractor.stages[2](low_feature)    # (B*7, 512, H/16, W/16)
+        low_feature = self._run_stage(self.feature_extractor.stages[2], low_feature)    # (B*7, 512, H/16, W/16)
         high_feature = self.feature_extractor.downsample_layers[3](low_feature)
-        high_feature = self.feature_extractor.stages[3](high_feature)  # (B*7, 1024, H/32, W/32)
+        high_feature = self._run_stage(self.feature_extractor.stages[3], high_feature)  # (B*7, 1024, H/32, W/32)
 
         # U-KAN encoder stage 4: tokenize high_feature, produce skip t4
         out, H4, W4 = self.patch_embed3(high_feature)
@@ -116,13 +126,17 @@ class PNSNet(nn.Module):
         high_feature_global = out[:, 0, ...].unsqueeze(1).repeat(1, 6, 1, 1, 1)  # (B, 6, 32, H/8, W/8)
         high_feature_local  = out[:, 1:7, ...]                                    # (B, 6, 32, H/8, W/8)
 
-        high_feature_1 = self.NSB_global(high_feature_global, high_feature_local) + high_feature_local
-        high_feature_2 = self.NSB_local(high_feature_1, high_feature_1) + high_feature_1
+        # NS_Block uses a custom CUDA kernel that only supports float32 -> run outside autocast
+        with torch.cuda.amp.autocast(enabled=False):
+            high_feature_global = high_feature_global.float()
+            high_feature_local = high_feature_local.float()
+            high_feature_1 = self.NSB_global(high_feature_global, high_feature_local) + high_feature_local
+            high_feature_2 = self.NSB_local(high_feature_1, high_feature_1) + high_feature_1
         out = (high_feature_2 + high_feature_local).contiguous().view(-1, *high_feature_2.shape[2:])
         # (B*6, 32, H/8, W/8)
 
         to_slice = t_h.shape[0] - out.shape[0]   # = B (remove anchor frame from skip)
-        out = out + t_h[to_slice:]
+        out = out + t_h[to_slice:].to(out.dtype)
 
         # Final decoder stages
         out = F.relu(F.interpolate(self.decoder4(out), scale_factor=(2, 2), mode='bilinear', align_corners=False))

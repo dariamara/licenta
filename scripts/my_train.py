@@ -10,6 +10,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils import data
 
+from torch.cuda.amp import autocast, GradScaler
+
 from config import config
 from lib.dataloader.dataloader import get_video_dataset
 from lib.module.EMA import EMA
@@ -72,11 +74,14 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
 
             images = images.cuda()
             gts = gts.cuda()
-            
-            preds = model(images)
-            
+
+            with autocast():
+                preds = model(images)
+
+            # loss in fp32 outside autocast: F.binary_cross_entropy is unsafe under fp16 autocast
+            preds = preds.float()
             loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
-            loss.backward()
+            scaler.scale(loss).backward()
 
             eval_preds = preds.contiguous().view(*(gts.shape))
 
@@ -87,6 +92,8 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
                     size += 1
 
             #clip_gradient(optimizer, config.clip)
+            # unscale before clipping so grad-clip sees true (unscaled) gradients
+            scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.clip)
 
             # backbone_norm = 0
@@ -106,7 +113,8 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             # backbone_grad_norms.append(backbone_norm)
             # head_grad_norms.append(head_norm)
 
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
 
             step += 1
             epoch_step += 1
@@ -185,8 +193,10 @@ def val(val_loader, model, epoch, loss_func):
 
             images = images.cuda()
             gts = gts.cuda()
-            
-            preds = model(images)
+
+            with autocast():
+                preds = model(images)
+            preds = preds.float()
 
             for j in range(gts.shape[1]):
                 dice = cofficent_calculate(preds[j], gts[0][j])[0]
@@ -229,8 +239,6 @@ if __name__ == '__main__':
 
     #contributie
     model = Network(bn_out=(config.size[0] // 8, config.size[1] // 8)).cuda()
-    #contributie
-    model = nn.DataParallel(model)
 
     cudnn.benchmark = True
 
@@ -242,7 +250,7 @@ if __name__ == '__main__':
     backbone_params = []
     head_params = []
     for name, param in model.named_parameters():
-        if name.startswith("module.feature_extractor"):
+        if name.startswith("feature_extractor"):
             backbone_params.append(param)
         else:
             head_params.append(param)
@@ -307,6 +315,9 @@ if __name__ == '__main__':
                  'save_path: {}; decay_epoch: {}'.format(config.epoches, config.head_lr, config.batchsize, config.size, config.clip,
                                                          config.decay_rate, config.save_path, config.decay_epoch))
     step = 0
+
+    # AMP gradient scaler (shared across epochs)
+    scaler = GradScaler()
 
     print("Start train...")
 
