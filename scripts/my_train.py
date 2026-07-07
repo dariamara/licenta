@@ -78,13 +78,14 @@ def train(train_loader, model, optimizer, epoch, save_path, loss_func):
             loss = loss_func(preds.squeeze().contiguous(), gts.contiguous().view(-1, *(gts.shape[2:])))
             loss.backward()
 
-            eval_preds = preds.contiguous().view(*(gts.shape))
+            with torch.no_grad():
+                eval_preds = preds.detach().contiguous().view(*(gts.shape))
 
-            for batch in range(gts.shape[0]):
-                for j in range(gts.shape[1]):
-                    dice = cofficent_calculate(eval_preds[batch][j], gts[batch][j])[0]
-                    dice_sum += dice
-                    size += 1
+                for batch in range(gts.shape[0]):
+                    for j in range(gts.shape[1]):
+                        dice = cofficent_calculate(eval_preds[batch][j], gts[batch][j])[0]
+                        dice_sum += dice.item()
+                        size += 1
 
             #clip_gradient(optimizer, config.clip)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=config.clip)
@@ -227,7 +228,7 @@ if __name__ == '__main__':
     # torch.manual_seed(seed)
     # torch.cuda.manual_seed_all(seed)
 
-    model = Network(bn_out=(config.size[0] // 16, config.size[1] // 16), use_kan = config.use_kan).cuda()
+    model = Network(bn_out=(config.size[0] // 8, config.size[1] // 8), use_kan = config.use_kan).cuda()
     model = nn.DataParallel(model)
 
     cudnn.benchmark = True
