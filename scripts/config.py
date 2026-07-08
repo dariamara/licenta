@@ -29,7 +29,7 @@ parser.add_argument('--size', type=tuple,
 parser.add_argument('--batchsize', type=int, default=24)
 parser.add_argument('--video_time_clips', type=int, default=6)
 
-parser.add_argument('--save_path', type=str, default='/tmp/work/')
+parser.add_argument('--save_path', type=str, default='/tmp/work_copy/')
 
 parser.add_argument('--augment', action='store_true', help='Enable augmentation')
 
@@ -45,7 +45,7 @@ parser.add_argument('--ema_test', action='store_true', help='Enable EMA for test
 
 parser.add_argument('--ema_train', action='store_true', help='Enable EMA for train')
 
-parser.add_argument('--save_path_preds', type=str, default="/storage/datasets/preds")
+parser.add_argument('--save_path_preds', type=str, default="/storage/datasets/preds_copy")
 
 parser.add_argument('--use_kan', action='store_true', help='Use KAN blocks')
 

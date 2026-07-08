@@ -316,5 +316,7 @@ if __name__ == '__main__':
 
     for epoch in range(start_epoch, config.epoches):
         train(train_loader, model, optimizer, epoch, save_path, loss_func)
+        torch.cuda.empty_cache()
         val(val_loader, model, epoch, loss_func_val)
+        torch.cuda.empty_cache()
 
