@@ -4,6 +4,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from img_processor import process_image
+from mednext_inference import process_frames
+from mednext_ukan_inference import process_frames as process_frames_ukan
 
 import os
 import shutil
@@ -24,6 +26,7 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 MODELS = {
     "convnext": "ConvNeXt model",
     "mednext_kan": "MedNeXt KAN model",
+    "mednext_ukan": "MedNeXt + U-KAN model",
 }
 
 
@@ -54,7 +57,8 @@ async def upload_images(request: Request, model: str = Form(...), files: list[Up
     #preserve folder order so the "video" plays back in the right sequence
     images.sort(key=lambda f: f.filename)
 
-    frames = []
+    input_paths = []
+    output_paths = []
     for i, file in enumerate(images):
         input_path = f"{STATIC_DIR}/original_{i:03}{os.path.splitext(file.filename)[1]}"
         output_path = f"{STATIC_DIR}/frame_{i:03}.png"
@@ -62,8 +66,18 @@ async def upload_images(request: Request, model: str = Form(...), files: list[Up
         with open(input_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        process_image(input_path, output_path)
-        frames.append(output_path)
+        input_paths.append(input_path)
+        output_paths.append(output_path)
+
+    if model == "mednext_kan":
+        process_frames(input_paths, output_paths)
+    elif model == "mednext_ukan":
+        process_frames_ukan(input_paths, output_paths)
+    else:
+        for input_path, output_path in zip(input_paths, output_paths):
+            process_image(input_path, output_path)
+
+    frames = output_paths
 
     return templates.TemplateResponse(
         request=request,

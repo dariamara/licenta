@@ -11,3 +11,7 @@ wheels/
 
 # Uploaded/processed images
 static/
+
+# Model weights (large binaries, not meant for git)
+weights/
+MedNeXt/*.pth
