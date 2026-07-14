@@ -15,3 +15,6 @@ static/
 # Model weights (large binaries, not meant for git)
 weights/
 MedNeXt/*.pth
+
+# Local dataset images, not meant for git
+data/
