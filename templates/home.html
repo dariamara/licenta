@@ -1,19 +1,77 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Image Processor</title>
+    <title>Polyp Segmentation Demo</title>
     <style>
-        body { font-family: sans-serif; }
-        .models { display: flex; gap: 12px; margin-top: 20px; }
-        .models a button { padding: 12px 20px; font-size: 16px; cursor: pointer; }
+        :root {
+            --green: #2e7d32;
+            --green-dark: #1b5e20;
+            --orange: #ef6c00;
+            --bg: #f6f8f6;
+            --text: #1f2a1f;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, Segoe UI, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .card {
+            background: #fff;
+            border-top: 6px solid var(--green);
+            border-radius: 12px;
+            padding: 40px 48px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            text-align: center;
+            max-width: 480px;
+        }
+        h1 {
+            margin: 0 0 8px;
+            color: var(--green-dark);
+        }
+        p.subtitle {
+            margin: 0 0 28px;
+            color: #555;
+        }
+        .models {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .models a {
+            text-decoration: none;
+        }
+        .models button {
+            width: 100%;
+            padding: 14px 20px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            background: var(--green);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .models button:hover {
+            background: var(--orange);
+        }
     </style>
 </head>
 <body>
-    <h1>Choose a Model</h1>
-    <div class="models">
-        {% for key, label in models.items() %}
-        <a href="/app?model={{ key }}"><button>{{ label }}</button></a>
-        {% endfor %}
+    <div class="card">
+        <h1>Polyp Segmentation Demo</h1>
+        <p class="subtitle">Choose a model to get started</p>
+        <div class="models">
+            {% for key, label in models.items() %}
+            <a href="/app?model={{ key }}"><button>{{ label }}</button></a>
+            {% endfor %}
+        </div>
     </div>
 </body>
 </html>

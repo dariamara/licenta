@@ -6,10 +6,10 @@ import torch.nn.functional as F
 from PIL import Image
 from torchvision.transforms import ToTensor, ToPILImage
 
-from lib.module.PNSPlusNetwork import PNSNet
+from lib.module.PNSPlusNetworkSegNeXt import PNSNet
 
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), "weights")
-PTH_PATH = os.path.join(WEIGHTS_DIR, "mednext_ukan_PNSPlus.pth")
+PTH_PATH = os.path.join(WEIGHTS_DIR, "SegNeXt_PNSPlus.pth")
 STATISTICS_PATH = os.path.join(WEIGHTS_DIR, "statistics.pth")
 
 SIZE = (256, 448)  # (height, width) -- matches config.size this checkpoint was trained with
@@ -22,10 +22,9 @@ OVERLAY_ALPHA = 0.4
 
 @lru_cache(maxsize=1)
 def _load_model():
-    # use_kan=True: the checkpoint's block_h_1/block_h_2 hold real KAN spline weights
-    # (fc1/fc2/fc3 have base_weight + spline_weight + spline_scaler + grid), one KANBlock
-    # per stage -- so kan_depths=(1, 1) and no_kan=False match what was actually trained.
-    model = PNSNet(bn_out=(SIZE[0] // 8, SIZE[1] // 8), use_kan=True, no_kan=False, kan_depths=(1, 1))
+    # use_kan=True: up_sample_high is a 4x4 transpose conv in this checkpoint (2x2 is what
+    # use_kan=False builds), so this SegNeXt checkpoint was trained with the KAN blocks on.
+    model = PNSNet(bn_out=(SIZE[0] // 8, SIZE[1] // 8), use_kan=True)
     checkpoint = torch.load(PTH_PATH, map_location=DEVICE, weights_only=False)
     # training wrapped the model in nn.DataParallel, which prefixes every key with "module."
     state_dict = {k.replace("module.", "", 1): v for k, v in checkpoint["model_state_dict"].items()}
@@ -57,8 +56,7 @@ def _preprocess(pil_img, mean, std):
 
 def process_frames(input_paths, output_paths):
     """
-    Runs PNSNet (MedNeXt encoder + U-KAN bottleneck) video-polyp-segmentation over a
-    sequence of consecutive frames.
+    Runs PNSNet (SegNeXt) video-polyp-segmentation over a sequence of consecutive frames.
 
     The network is temporal: every inference clip is [anchor_frame, 6 consecutive local
     frames], and only the 6 local frames receive a predicted mask -- mirroring the test-time

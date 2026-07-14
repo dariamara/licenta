@@ -1,79 +1,193 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Image Processor</title>
+    <title>Polyp Segmentation Demo</title>
     <style>
-        .player { margin-top: 20px; }
-        .player img { max-width: 500px; border: 1px solid #ddd; display: block; }
-        .controls { margin-top: 10px; display: flex; align-items: center; gap: 10px; }
+        :root {
+            --green: #2e7d32;
+            --green-dark: #1b5e20;
+            --orange: #ef6c00;
+            --bg: #f6f8f6;
+            --text: #1f2a1f;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, Segoe UI, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            background: #fff;
+            border-top: 6px solid var(--green);
+            border-radius: 12px;
+            padding: 32px 40px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+            width: 100%;
+            max-width: {{ '960px' if frames else '560px' }};
+            display: flex;
+            gap: 36px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+        .left-panel {
+            flex: {{ '0 0 300px' if frames else '1 1 auto' }};
+        }
+        .right-panel {
+            flex: 1 1 480px;
+            min-width: 0;
+        }
+        a.back {
+            color: var(--green);
+            font-weight: 600;
+            text-decoration: none;
+        }
+        a.back:hover { color: var(--orange); }
+        h1 {
+            color: var(--green-dark);
+            margin: 12px 0 4px;
+            font-size: 22px;
+        }
+        p.model-label strong { color: var(--orange); }
+        form {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        input[type="file"] {
+            border: 2px dashed var(--green);
+            border-radius: 8px;
+            padding: 16px;
+        }
+        button[type="submit"] {
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            background: var(--green);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        button[type="submit"]:hover { background: var(--orange); }
+
+        .player h3 {
+            color: var(--green-dark);
+            margin-top: 0;
+        }
+        .frame-frame {
+            width: 100%;
+            aspect-ratio: 16 / 9;
+            background: #111;
+            border: 2px solid var(--green);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .frame-frame img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .controls {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #play-pause {
+            padding: 8px 16px;
+            font-weight: 600;
+            color: #fff;
+            background: var(--orange);
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        #play-pause:hover { background: var(--green); }
+        #scrubber { flex: 1; accent-color: var(--green); }
+        #frame-count { color: #555; font-size: 14px; }
     </style>
 </head>
 <body>
-    <p><a href="/">&larr; Choose a different model</a></p>
-    <h1>Upload a Folder of Images</h1>
-    <p>Using model: <strong>{{ model_label }}</strong></p>
-    <form action="/upload/" method="post" enctype="multipart/form-data">
-        <input type="hidden" name="model" value="{{ model }}">
-        <input type="file" name="files" webkitdirectory directory multiple>
-        <button type="submit">Upload & Process</button>
-    </form>
-
-    {% if frames %}
-    <div class="player">
-        <h3>Processed ({{ frames|length }} frames)</h3>
-        <img id="frame-view" src="/{{ frames[0] }}" alt="Processed frame">
-        <div class="controls">
-            <button id="play-pause">Pause</button>
-            <input id="scrubber" type="range" min="0" max="{{ frames|length - 1 }}" value="0" style="flex: 1;">
-            <span id="frame-count">1 / {{ frames|length }}</span>
+    <div class="container">
+        <div class="left-panel">
+            <a class="back" href="/">&larr; Choose a different model</a>
+            <h1>Upload a Folder of Images</h1>
+            <p class="model-label">Using model: <strong>{{ model_label }}</strong></p>
+            <form action="/upload/" method="post" enctype="multipart/form-data">
+                <input type="hidden" name="model" value="{{ model }}">
+                <input type="file" name="files" webkitdirectory directory multiple>
+                <button type="submit">Upload & Process</button>
+            </form>
         </div>
+
+        {% if frames %}
+        <div class="right-panel player">
+            <h3>Processed ({{ frames|length }} frames)</h3>
+            <div class="frame-frame">
+                <img id="frame-view" src="/{{ frames[0] }}" alt="Processed frame">
+            </div>
+            <div class="controls">
+                <button id="play-pause">Pause</button>
+                <input id="scrubber" type="range" min="0" max="{{ frames|length - 1 }}" value="0">
+                <span id="frame-count">1 / {{ frames|length }}</span>
+            </div>
+        </div>
+
+        <script>
+            const frames = {{ frames|tojson }};
+            const fps = 10;
+            const img = document.getElementById("frame-view");
+            const playPauseBtn = document.getElementById("play-pause");
+            const scrubber = document.getElementById("scrubber");
+            const frameCount = document.getElementById("frame-count");
+
+            let current = 0;
+            let playing = true;
+            let intervalId = null;
+
+            function showFrame(i) {
+                current = i;
+                img.src = "/" + frames[current];
+                scrubber.value = current;
+                frameCount.textContent = (current + 1) + " / " + frames.length;
+            }
+
+            function tick() {
+                showFrame((current + 1) % frames.length);
+            }
+
+            function play() {
+                playing = true;
+                playPauseBtn.textContent = "Pause";
+                intervalId = setInterval(tick, 1000 / fps);
+            }
+
+            function pause() {
+                playing = false;
+                playPauseBtn.textContent = "Play";
+                clearInterval(intervalId);
+            }
+
+            playPauseBtn.addEventListener("click", () => playing ? pause() : play());
+            scrubber.addEventListener("input", (e) => {
+                pause();
+                showFrame(parseInt(e.target.value, 10));
+            });
+
+            if (frames.length > 1) {
+                play();
+            }
+        </script>
+        {% endif %}
     </div>
-
-    <script>
-        const frames = {{ frames|tojson }};
-        const fps = 10;
-        const img = document.getElementById("frame-view");
-        const playPauseBtn = document.getElementById("play-pause");
-        const scrubber = document.getElementById("scrubber");
-        const frameCount = document.getElementById("frame-count");
-
-        let current = 0;
-        let playing = true;
-        let intervalId = null;
-
-        function showFrame(i) {
-            current = i;
-            img.src = "/" + frames[current];
-            scrubber.value = current;
-            frameCount.textContent = (current + 1) + " / " + frames.length;
-        }
-
-        function tick() {
-            showFrame((current + 1) % frames.length);
-        }
-
-        function play() {
-            playing = true;
-            playPauseBtn.textContent = "Pause";
-            intervalId = setInterval(tick, 1000 / fps);
-        }
-
-        function pause() {
-            playing = false;
-            playPauseBtn.textContent = "Play";
-            clearInterval(intervalId);
-        }
-
-        playPauseBtn.addEventListener("click", () => playing ? pause() : play());
-        scrubber.addEventListener("input", (e) => {
-            pause();
-            showFrame(parseInt(e.target.value, 10));
-        });
-
-        if (frames.length > 1) {
-            play();
-        }
-    </script>
-    {% endif %}
 </body>
 </html>

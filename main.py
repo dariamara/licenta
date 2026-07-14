@@ -1,11 +1,11 @@
-from fastapi import FastAPI, File, Form, UploadFile, Request
+from fastapi import FastAPI, File, Form, UploadFile, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from img_processor import process_image
 from mednext_inference import process_frames
 from mednext_ukan_inference import process_frames as process_frames_ukan
+from segnext_inference import process_frames as process_frames_segnext
 
 import os
 import shutil
@@ -24,9 +24,9 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"}
 
 MODELS = {
-    "convnext": "ConvNeXt model",
     "mednext_kan": "MedNeXt KAN model",
     "mednext_ukan": "MedNeXt + U-KAN model",
+    "segnext": "SegNeXt model",
 }
 
 
@@ -73,9 +73,10 @@ async def upload_images(request: Request, model: str = Form(...), files: list[Up
         process_frames(input_paths, output_paths)
     elif model == "mednext_ukan":
         process_frames_ukan(input_paths, output_paths)
+    elif model == "segnext":
+        process_frames_segnext(input_paths, output_paths)
     else:
-        for input_path, output_path in zip(input_paths, output_paths):
-            process_image(input_path, output_path)
+        raise HTTPException(status_code=400, detail=f"Unknown model: {model}")
 
     frames = output_paths
 

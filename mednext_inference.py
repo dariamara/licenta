@@ -9,12 +9,15 @@ from torchvision.transforms import ToTensor, ToPILImage
 from lib.module.PNSPlusNetwork import PNSNet
 
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), "weights")
-PTH_PATH = os.path.join(WEIGHTS_DIR, "PNSPlus.pth")
+PTH_PATH = os.path.join(WEIGHTS_DIR, "mednext_PNSPlus.pth")
 STATISTICS_PATH = os.path.join(WEIGHTS_DIR, "statistics.pth")
 
 SIZE = (256, 448)  # (height, width) -- matches config.size this checkpoint was trained with
 TIME_CLIPS = 6  # matches config.video_time_clips
 DEVICE = torch.device("cpu")
+
+OVERLAY_COLOR = (0, 255, 0)  # green
+OVERLAY_ALPHA = 0.4
 
 
 @lru_cache(maxsize=1)
@@ -93,12 +96,17 @@ def process_frames(input_paths, output_paths):
 
     for i in range(n):
         mask = masks[i]
-        frame = frames[i]
+        frame = frames[i].convert("RGB")
         if mask is None:
-            # anchor frame: no direct prediction under this scheme, output a blank mask
-            out = Image.new("L", frame.size, color=0)
+            # anchor frame: no direct prediction under this scheme, show the original frame untouched
+            out = frame
         else:
             prob = mask.unsqueeze(0).unsqueeze(0)
             prob = F.interpolate(prob, size=(frame.height, frame.width), mode="bilinear", align_corners=False)
-            out = ToPILImage()((prob.squeeze(0).squeeze(0) > 0.5).float())
+            binary_mask = (prob.squeeze(0).squeeze(0) > 0.5).float()
+            # alpha_mask values are 0 or OVERLAY_ALPHA*255, so Image.composite blends the
+            # color layer over the original frame only where the model predicted positive
+            alpha_mask = ToPILImage()(binary_mask * OVERLAY_ALPHA)
+            color_layer = Image.new("RGB", frame.size, OVERLAY_COLOR)
+            out = Image.composite(color_layer, frame, alpha_mask)
         out.save(output_paths[i])
